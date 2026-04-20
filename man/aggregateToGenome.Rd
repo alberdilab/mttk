@@ -20,7 +20,9 @@ A \code{SummarizedExperiment} with one row per genome.
 \description{
 \code{aggregateToGenome()} is a convenience wrapper around \code{aggregateByLink()} for
 the common case of aggregating gene-level measurements to genomes through the
-\code{gene_to_genome} link table.
+\code{gene_to_genome} link table. When an input assay name contains \code{"_gene_"},
+the returned assay name is rewritten with \code{"_genome_"} so the level of the
+aggregated data remains explicit.
 }
 \examples{
 x <- makeExampleMTTKExperiment()

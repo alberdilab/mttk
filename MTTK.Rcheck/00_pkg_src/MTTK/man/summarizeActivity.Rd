@@ -2,13 +2,13 @@
 % Please edit documentation in R/MTTKExperiment-analysis.R
 \name{summarizeActivity}
 \alias{summarizeActivity}
-\title{Summarize RNA-over-DNA Activity}
+\title{Summarize Gene or Genome Activity}
 \usage{
 summarizeActivity(
   x,
-  by = c("feature", "genome"),
-  numeratorAssay = "rna_counts",
-  denominatorAssay = "dna_counts",
+  by = c("gene", "genome"),
+  numeratorAssay = "rna_gene_counts",
+  genomeAssay = "dna_genome_counts",
   pseudocount = 1,
   transform = c("log2_ratio", "ratio")
 )
@@ -16,13 +16,14 @@ summarizeActivity(
 \arguments{
 \item{x}{An \code{MTTKExperiment}.}
 
-\item{by}{Level at which activity should be summarized. \code{"feature"} uses the
-assays as stored, while \code{"genome"} first aggregates both assays with
+\item{by}{Level at which activity should be summarized. \code{"gene"} uses the
+gene-level RNA assay together with the genome-level DNA assay, while
+\code{"genome"} first aggregates the gene-level RNA assay with
 \code{aggregateToGenome()}.}
 
-\item{numeratorAssay}{Assay used as the numerator.}
+\item{numeratorAssay}{Gene-level assay used as the numerator.}
 
-\item{denominatorAssay}{Assay used as the denominator.}
+\item{genomeAssay}{Genome-level assay used as the denominator.}
 
 \item{pseudocount}{Numeric pseudocount added to both assays before division.}
 
@@ -35,9 +36,11 @@ A \code{SummarizedExperiment} containing a single assay named
 \code{"log2_activity"} or \code{"activity"}.
 }
 \description{
-\code{summarizeActivity()} computes a simple RNA-over-DNA activity summary from two
-assays, typically \code{rna_counts} and \code{dna_counts}. The summary can be computed
-at the feature level or after aggregation to genomes.
+\code{summarizeActivity()} computes a simple RNA-over-DNA activity summary from a
+gene-level RNA assay and a genome-level DNA assay. The summary can be
+computed for each gene by pairing every gene with the DNA abundance of its
+parent genome, or at the genome level after aggregating gene-level RNA to
+genomes.
 }
 \details{
 This function is intended as a first, transparent analysis helper for the
@@ -48,7 +51,7 @@ samples.
 \examples{
 x <- makeExampleMTTKExperiment()
 
-summarizeActivity(x, by = "feature")
+summarizeActivity(x, by = "gene")
 summarizeActivity(x, by = "genome")
 
 }

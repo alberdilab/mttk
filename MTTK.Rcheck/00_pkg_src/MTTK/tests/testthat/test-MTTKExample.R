@@ -10,14 +10,19 @@ test_that("the packaged example object is available and reproducible", {
     expect_identical(names(links(x)), names(links(MTTKExample)))
     expect_identical(activeHierarchies(x), activeHierarchies(MTTKExample))
     expect_identical(
-        names(SummarizedExperiment::assays(x, withDimnames = FALSE)),
-        c("rna_counts", "dna_counts")
+        names(geneAssays(x, withDimnames = FALSE)),
+        "rna_gene_counts"
+    )
+    expect_identical(
+        names(genomeAssays(MTTKExample, withDimnames = FALSE)),
+        "dna_genome_counts"
     )
     expect_identical(
         names(links(MTTKExample)),
         c("gene_to_genome", "gene_to_ko", "ko_to_module", "module_to_pathway")
     )
     expect_identical(rownames(genomeData(MTTKExample)), c("genome_1", "genome_2", "genome_3"))
+    expect_identical(dim(dnaGenomeCounts(MTTKExample)), c(3L, 4L))
     expect_identical(S4Vectors::metadata(MTTKExample)$study_name,
         "Synthetic genome-resolved metatranscriptomics example"
     )

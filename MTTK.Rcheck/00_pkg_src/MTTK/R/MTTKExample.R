@@ -3,7 +3,7 @@
     sample_ids <- paste0("sample_", seq_len(4))
     genome_ids <- paste0("genome_", seq_len(3))
 
-    rna_counts <- matrix(
+    rna_gene_counts <- matrix(
         c(
             120L, 110L, 210L, 230L,
             35L, 30L, 70L, 80L,
@@ -17,18 +17,15 @@
         dimnames = list(gene_ids, sample_ids)
     )
 
-    dna_counts <- matrix(
+    dna_genome_counts <- matrix(
         c(
             50L, 48L, 52L, 54L,
-            50L, 48L, 52L, 54L,
             30L, 32L, 31L, 29L,
-            30L, 32L, 31L, 29L,
-            20L, 22L, 19L, 18L,
             20L, 22L, 19L, 18L
         ),
-        nrow = length(gene_ids),
+        nrow = length(genome_ids),
         byrow = TRUE,
-        dimnames = list(gene_ids, sample_ids)
+        dimnames = list(genome_ids, sample_ids)
     )
 
     row_data <- S4Vectors::DataFrame(
@@ -93,11 +90,13 @@
 
     list(
         assays = list(
-            rna_counts = rna_counts,
-            dna_counts = dna_counts
+            rna_gene_counts = rna_gene_counts
         ),
         rowData = row_data,
         colData = col_data,
+        genomeAssays = list(
+            dna_genome_counts = dna_genome_counts
+        ),
         genomeData = genome_data,
         links = link_tables,
         activeHierarchies = c("biological_origin", "functional_annotation"),
@@ -115,6 +114,7 @@
         assays = components$assays,
         rowData = components$rowData,
         colData = components$colData,
+        genomeAssays = components$genomeAssays,
         genomeData = components$genomeData,
         links = components$links,
         activeHierarchies = components$activeHierarchies,
@@ -130,7 +130,8 @@
 #' The returned object contains:
 #'
 #' - six genes measured across four samples,
-#' - paired `rna_counts` and `dna_counts` assays,
+#' - a gene-level `rna_gene_counts` assay,
+#' - a genome-level `dna_genome_counts` assay stored in `genomeExperiment(x)`,
 #' - feature, sample, and genome metadata,
 #' - explicit biological and functional mapping tables.
 #'
@@ -151,9 +152,9 @@ makeExampleMTTKExperiment <- function() {
 #' `MTTKExample` is a packaged `MTTKExperiment` object for examples,
 #' documentation, and quick interactive use.
 #'
-#' The object contains two assays (`rna_counts` and `dna_counts`), six genes,
-#' four samples, three genomes, and a small set of biological and functional
-#' link tables.
+#' The object contains one gene-level assay (`rna_gene_counts`), one
+#' genome-level assay (`dna_genome_counts`), six genes, four samples, three
+#' genomes, and a small set of biological and functional link tables.
 #'
 #' @docType data
 #' @format An `MTTKExperiment` object with 6 rows and 4 columns.
@@ -166,5 +167,6 @@ makeExampleMTTKExperiment <- function() {
 #' data("MTTKExample")
 #' MTTKExample
 #' genomeData(MTTKExample)
+#' dnaGenomeCounts(MTTKExample)
 #'
 "MTTKExample"

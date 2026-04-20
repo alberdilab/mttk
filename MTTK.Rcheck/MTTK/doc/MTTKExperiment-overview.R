@@ -12,6 +12,18 @@ data("MTTKExample")
 MTTKExample
 
 ## -----------------------------------------------------------------------------
+geneExperiment(x)
+
+## -----------------------------------------------------------------------------
+genomeExperiment(x)
+
+## -----------------------------------------------------------------------------
+names(geneAssays(x))
+
+## -----------------------------------------------------------------------------
+names(genomeAssays(x))
+
+## -----------------------------------------------------------------------------
 genomeData(x)
 
 ## -----------------------------------------------------------------------------
@@ -21,25 +33,28 @@ names(links(x))
 activeHierarchies(x)
 
 ## -----------------------------------------------------------------------------
-rnaCounts(x)
+rnaGeneCounts(x)
 
 ## -----------------------------------------------------------------------------
-genome_counts <- aggregateToGenome(x)
-genome_counts
+dnaGenomeCounts(x)
+
+## -----------------------------------------------------------------------------
+genome_rna <- aggregateToGenome(x)
+genome_rna
 
 ## -----------------------------------------------------------------------------
 module_counts <- aggregateByLink(
     x,
     path = c("gene_to_ko", "ko_to_module"),
-    assays = "rna_counts"
+    assays = "rna_gene_counts"
 )
 
 module_counts
 
 ## -----------------------------------------------------------------------------
-feature_activity <- summarizeActivity(x, by = "feature")
+gene_activity <- summarizeActivity(x, by = "gene")
 genome_activity <- summarizeActivity(x, by = "genome")
 
-feature_activity
+gene_activity
 genome_activity
 

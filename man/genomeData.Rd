@@ -26,6 +26,6 @@ genomeData(x) <- value
 method returns an updated \code{MTTKExperiment}.
 }
 \description{
-\code{genomeData()} returns the genome-level metadata stored in an
-\code{MTTKExperiment}.
+\code{genomeData()} returns the genome-level metadata stored in
+\code{rowData(genomeExperiment(x))}.
 }

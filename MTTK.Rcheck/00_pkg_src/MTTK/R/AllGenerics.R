@@ -1,3 +1,51 @@
+#' @rdname geneExperiment
+#' @export
+methods::setGeneric("geneExperiment", function(x) {
+    standardGeneric("geneExperiment")
+})
+
+#' @rdname geneExperiment
+#' @export
+methods::setGeneric("geneExperiment<-", function(x, value) {
+    standardGeneric("geneExperiment<-")
+})
+
+#' @rdname genomeExperiment
+#' @export
+methods::setGeneric("genomeExperiment", function(x) {
+    standardGeneric("genomeExperiment")
+})
+
+#' @rdname genomeExperiment
+#' @export
+methods::setGeneric("genomeExperiment<-", function(x, value) {
+    standardGeneric("genomeExperiment<-")
+})
+
+#' @rdname geneAssays
+#' @export
+methods::setGeneric("geneAssays", function(x, withDimnames = TRUE) {
+    standardGeneric("geneAssays")
+})
+
+#' @rdname geneAssays
+#' @export
+methods::setGeneric("geneAssays<-", function(x, value) {
+    standardGeneric("geneAssays<-")
+})
+
+#' @rdname genomeAssays
+#' @export
+methods::setGeneric("genomeAssays", function(x, withDimnames = TRUE) {
+    standardGeneric("genomeAssays")
+})
+
+#' @rdname genomeAssays
+#' @export
+methods::setGeneric("genomeAssays<-", function(x, value) {
+    standardGeneric("genomeAssays<-")
+})
+
 #' @rdname genomeData
 #' @export
 methods::setGeneric("genomeData", function(x) {
@@ -34,26 +82,38 @@ methods::setGeneric("activeHierarchies<-", function(x, value) {
     standardGeneric("activeHierarchies<-")
 })
 
-#' @rdname rnaCounts
+#' @rdname rnaGeneCounts
 #' @export
-methods::setGeneric("rnaCounts", function(x, withDimnames = TRUE) {
-    standardGeneric("rnaCounts")
+methods::setGeneric("rnaGeneCounts", function(x, withDimnames = TRUE) {
+    standardGeneric("rnaGeneCounts")
 })
 
-#' @rdname rnaCounts
+#' @rdname rnaGeneCounts
 #' @export
-methods::setGeneric("rnaCounts<-", function(x, value) {
-    standardGeneric("rnaCounts<-")
+methods::setGeneric("rnaGeneCounts<-", function(x, value) {
+    standardGeneric("rnaGeneCounts<-")
 })
 
-#' @rdname dnaCounts
+#' @rdname rnaGenomeCounts
 #' @export
-methods::setGeneric("dnaCounts", function(x, withDimnames = TRUE) {
-    standardGeneric("dnaCounts")
+methods::setGeneric("rnaGenomeCounts", function(x, withDimnames = TRUE) {
+    standardGeneric("rnaGenomeCounts")
 })
 
-#' @rdname dnaCounts
+#' @rdname rnaGenomeCounts
 #' @export
-methods::setGeneric("dnaCounts<-", function(x, value) {
-    standardGeneric("dnaCounts<-")
+methods::setGeneric("rnaGenomeCounts<-", function(x, value) {
+    standardGeneric("rnaGenomeCounts<-")
+})
+
+#' @rdname dnaGenomeCounts
+#' @export
+methods::setGeneric("dnaGenomeCounts", function(x, withDimnames = TRUE) {
+    standardGeneric("dnaGenomeCounts")
+})
+
+#' @rdname dnaGenomeCounts
+#' @export
+methods::setGeneric("dnaGenomeCounts<-", function(x, value) {
+    standardGeneric("dnaGenomeCounts<-")
 })

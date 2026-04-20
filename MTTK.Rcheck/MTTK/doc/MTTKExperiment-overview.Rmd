@@ -34,11 +34,16 @@ sample metadata, and optional trees.
 
 An `MTTKExperiment` stores information at several levels:
 
-- `assays(x)` stores matrices such as RNA counts, DNA counts, normalized values,
-  offsets, fitted values, or residuals.
+- `geneExperiment(x)` names the gene-level layer of the object.
+- `geneAssays(x)` stores gene-level matrices such as RNA counts, normalized RNA
+  values, offsets, fitted values, or residuals.
 - `rowData(x)` stores feature-level metadata for genes or transcripts.
 - `colData(x)` stores sample-level metadata.
-- `genomeData(x)` stores one row per genome.
+- `genomeExperiment(x)` stores genome-level assays with one row per genome.
+- `genomeAssays(x)` stores the assay collection attached to
+  `genomeExperiment(x)`.
+- `genomeData(x)` stores the genome-level metadata attached to
+  `genomeExperiment(x)`.
 - `links(x)` stores explicit mapping tables such as gene-to-genome,
   gene-to-annotation, or annotation-to-parent relationships.
 - `activeHierarchies(x)` records which hierarchies are currently active in a
@@ -46,10 +51,18 @@ An `MTTKExperiment` stores information at several levels:
 - `rowTree(x)` and `rowLinks(x)` can store true tree-structured hierarchies when
   a hierarchy is naturally represented as a tree.
 
-The important design choice in this early version is that genome metadata and
-explicit mapping tables are stored transparently in `metadata(x)$mttk`. This
-keeps the class close to existing Bioconductor infrastructure and makes the
-stored information easy to inspect.
+The important design choice in this version is that gene-level and genome-level
+measurements are stored separately:
+
+- `MTTKExperiment` itself is the gene-level experiment,
+- `geneExperiment(x)` and `geneAssays(x)` give that layer an explicit name,
+- genome-level assays live in `genomeExperiment(x)`,
+- explicit mapping tables and hierarchy labels remain easy to inspect through
+  `links(x)` and `activeHierarchies(x)`.
+
+This makes the common metatranscriptomic layout explicit: genes have RNA
+counts, aggregated genome RNA can be stored separately, genomes have DNA
+abundances, and genes are linked back to genomes.
 
 # Current package structure
 
@@ -93,6 +106,22 @@ The package provides a small set of explicit accessors for the MTTK-specific
 parts of the object.
 
 ```{r}
+geneExperiment(x)
+```
+
+```{r}
+genomeExperiment(x)
+```
+
+```{r}
+names(geneAssays(x))
+```
+
+```{r}
+names(genomeAssays(x))
+```
+
+```{r}
 genomeData(x)
 ```
 
@@ -105,25 +134,33 @@ activeHierarchies(x)
 ```
 
 ```{r}
-rnaCounts(x)
+rnaGeneCounts(x)
 ```
 
-Assay convenience accessors follow a fixed naming convention. In the current
-implementation:
+```{r}
+dnaGenomeCounts(x)
+```
 
-- `rnaCounts(x)` reads or sets the assay named `"rna_counts"`.
-- `dnaCounts(x)` reads or sets the assay named `"dna_counts"`.
+Assay convenience accessors follow a fixed naming convention:
+
+- `rnaGeneCounts(x)` reads or sets the gene-level assay named
+  `"rna_gene_counts"`.
+- `rnaGenomeCounts(x)` reads or sets the genome-level assay named
+  `"rna_genome_counts"`.
+- `dnaGenomeCounts(x)` reads or sets the genome-level assay named
+  `"dna_genome_counts"`.
 
 # Running simple analyses
 
 The first analysis helpers focus on transparent summaries that work directly
 with explicit link tables.
 
-Genome-level aggregation:
+Genome-level aggregation of gene-level RNA. The resulting assay is renamed to
+`"rna_genome_counts"` so it is easy to distinguish from stored gene-level RNA.
 
 ```{r}
-genome_counts <- aggregateToGenome(x)
-genome_counts
+genome_rna <- aggregateToGenome(x)
+genome_rna
 ```
 
 Aggregation through a multi-step functional path:
@@ -132,19 +169,19 @@ Aggregation through a multi-step functional path:
 module_counts <- aggregateByLink(
     x,
     path = c("gene_to_ko", "ko_to_module"),
-    assays = "rna_counts"
+    assays = "rna_gene_counts"
 )
 
 module_counts
 ```
 
-RNA-over-DNA activity summaries:
+Gene- and genome-level RNA-over-DNA activity summaries:
 
 ```{r}
-feature_activity <- summarizeActivity(x, by = "feature")
+gene_activity <- summarizeActivity(x, by = "gene")
 genome_activity <- summarizeActivity(x, by = "genome")
 
-feature_activity
+gene_activity
 genome_activity
 ```
 
@@ -162,9 +199,13 @@ schemas are stabilized.
 
 This conservative design keeps the first implementation predictable:
 
-- assays live in standard Bioconductor assay storage,
+- the gene-level and genome-level layers are both explicitly named,
+- gene-level assays live in the main Bioconductor assay storage,
+- genome-level assays live in `genomeExperiment(x)`,
 - sample and feature metadata stay in standard Bioconductor slots,
 - genome-level metadata and mapping tables remain easy to inspect,
+- explicit assay names distinguish `rnaGeneCounts`, `rnaGenomeCounts`, and
+  `dnaGenomeCounts`,
 - future modeling and network layers can build on the same container without
   changing the basic object layout.
 

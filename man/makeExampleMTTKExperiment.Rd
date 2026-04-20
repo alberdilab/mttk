@@ -17,7 +17,8 @@ used in examples, tests, and interactive exploration of the package.
 The returned object contains:
 \itemize{
 \item six genes measured across four samples,
-\item paired \code{rna_counts} and \code{dna_counts} assays,
+\item a gene-level \code{rna_gene_counts} assay,
+\item a genome-level \code{dna_genome_counts} assay stored in \code{genomeExperiment(x)},
 \item feature, sample, and genome metadata,
 \item explicit biological and functional mapping tables.
 }

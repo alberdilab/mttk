@@ -22,10 +22,10 @@ A \code{SummarizedExperiment} with aggregated assays, copied \code{colData},
 aggregated \code{rowData}, and provenance stored in \code{metadata()}.
 }
 \description{
-\code{aggregateByLink()} aggregates one or more assays in an \code{MTTKExperiment}
-along one or more explicit link tables. This makes it possible to summarize
-gene-level measurements to genomes, KOs, modules, pathways, or other mapped
-feature groups.
+\code{aggregateByLink()} aggregates one or more gene-level assays in an
+\code{MTTKExperiment} along one or more explicit link tables. This makes it
+possible to summarize RNA measurements to genomes, KOs, modules, pathways,
+or other mapped feature groups.
 }
 \details{
 The current implementation expects each link table in the path to be ordered

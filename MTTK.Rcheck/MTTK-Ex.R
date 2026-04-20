@@ -21,6 +21,7 @@ flush(stderr()); flush(stdout())
 data("MTTKExample")
 MTTKExample
 genomeData(MTTKExample)
+dnaGenomeCounts(MTTKExample)
 
 
 
@@ -89,14 +90,14 @@ nameEx("summarizeActivity")
 flush(stderr()); flush(stdout())
 
 ### Name: summarizeActivity
-### Title: Summarize RNA-over-DNA Activity
+### Title: Summarize Gene or Genome Activity
 ### Aliases: summarizeActivity
 
 ### ** Examples
 
 x <- makeExampleMTTKExperiment()
 
-summarizeActivity(x, by = "feature")
+summarizeActivity(x, by = "gene")
 summarizeActivity(x, by = "genome")
 
 

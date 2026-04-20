@@ -11,6 +11,8 @@ MTTKExperiment(
   rowNodeLab = NULL,
   colNodeLab = NULL,
   referenceSeq = NULL,
+  genomeExperiment = NULL,
+  genomeAssays = NULL,
   genomeData = NULL,
   links = NULL,
   activeHierarchies = NULL,
@@ -20,7 +22,7 @@ MTTKExperiment(
 \arguments{
 \item{...}{Arguments passed to
 \code{\link[TreeSummarizedExperiment:TreeSummarizedExperiment-constructor]{TreeSummarizedExperiment::TreeSummarizedExperiment()}}, typically including
-\code{assays}, \code{rowData}, \code{colData}, and \code{metadata}.}
+gene-level \code{assays}, \code{rowData}, \code{colData}, and \code{metadata}.}
 
 \item{rowTree, colTree}{Optional row and column trees passed to
 \code{TreeSummarizedExperiment()}.}
@@ -31,8 +33,16 @@ MTTKExperiment(
 \item{referenceSeq}{Optional reference sequence information passed to
 \code{TreeSummarizedExperiment()}.}
 
+\item{genomeExperiment}{Optional genome-level \code{SummarizedExperiment} with one
+row per genome and one column per sample.}
+
+\item{genomeAssays}{Optional named list of genome-level assays. This is a
+convenient way to provide genome DNA abundances or aggregated genome RNA
+assays without building \code{genomeExperiment} by hand.}
+
 \item{genomeData}{Genome-level metadata as an \code{S4Vectors::DataFrame} or
-\code{data.frame}. Use \code{NULL} to create an empty table.}
+\code{data.frame}. When genome-level assays are present, this becomes
+\code{rowData(genomeExperiment(x))}.}
 
 \item{links}{A named \code{S4Vectors::SimpleList} or named \code{list} of mapping
 tables. Each entry must be an \code{S4Vectors::DataFrame} or \code{data.frame}.}
@@ -41,15 +51,18 @@ tables. Each entry must be an \code{S4Vectors::DataFrame} or \code{data.frame}.}
 use.}
 
 \item{metadata}{Additional experiment-level metadata. Existing
-\code{metadata$mttk} entries are respected when the corresponding dedicated
-arguments are left as \code{NULL}.}
+\code{metadata$mttk} entries for \code{links} and \code{activeHierarchies} are respected
+when the corresponding dedicated arguments are left as \code{NULL}.
+
+Gene-level and genome-level assays should use explicit names such as
+\code{"rna_gene_counts"}, \code{"rna_genome_counts"}, and \code{"dna_genome_counts"}.}
 }
 \value{
 A valid \code{MTTKExperiment}.
 }
 \description{
 \code{MTTKExperiment()} creates the main container used by MTTK. It wraps
-\code{\link[TreeSummarizedExperiment:TreeSummarizedExperiment-constructor]{TreeSummarizedExperiment::TreeSummarizedExperiment()}} and adds reserved
-metadata fields for genome-level annotations, explicit mapping tables, and
-the names of active hierarchies.
+\code{\link[TreeSummarizedExperiment:TreeSummarizedExperiment-constructor]{TreeSummarizedExperiment::TreeSummarizedExperiment()}} and adds MTTK-specific
+support for an explicit gene-level layer, a genome-level companion
+experiment, explicit mapping tables, and active hierarchy labels.
 }

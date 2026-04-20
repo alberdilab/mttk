@@ -19,10 +19,17 @@ relationships among features or samples.
 The core assay container is inherited from
 \code{TreeSummarizedExperiment}:
 \itemize{
-\item \code{assays} can hold RNA counts, DNA counts, normalized values, offsets,
-fitted values, residuals, or other assay matrices.
+\item \code{geneExperiment(x)} names the gene-level layer of the object. In practice,
+the \code{MTTKExperiment} itself is the gene-level experiment.
+\item \code{geneAssays(x)} hold gene-level measurements such as RNA counts,
+normalized RNA values, offsets, fitted values, or residuals.
 \item \code{rowData} stores feature-level metadata for genes or transcripts.
 \item \code{colData} stores sample-level metadata.
+\item \code{genomeExperiment(x)} stores genome-level assays such as genome DNA counts
+or aggregated genome RNA counts in a dedicated companion experiment with
+one row per genome.
+\item \code{genomeAssays(x)} names the assay collection stored in
+\code{genomeExperiment(x)}.
 \item \code{rowTree} and \code{rowLinks} can store optional named hierarchies when a
 relationship is naturally tree-structured.
 }
@@ -30,17 +37,18 @@ relationship is naturally tree-structured.
 
 \section{MTTK metadata contract}{
 
-The first version keeps MTTK-specific components in \code{metadata(x)$mttk} rather
-than adding custom slots. This keeps the class close to existing
-Bioconductor infrastructure and makes the stored information easy to inspect.
-The following entries are reserved:
+MTTK-specific components are kept close to existing Bioconductor
+infrastructure:
 \itemize{
-\item \code{genomeData}: an \code{S4Vectors::DataFrame} with one row per genome.
+\item \code{genomeData(x)} is stored as \code{rowData(genomeExperiment(x))}.
+\item explicit assay names such as \code{"rna_gene_counts"}, \code{"rna_genome_counts"},
+and \code{"dna_genome_counts"} make it clear which data layer an assay belongs
+to.
 \item \code{links}: a named \code{S4Vectors::SimpleList} of mapping tables, such as
 gene-to-genome links, gene-to-annotation links, or parent-child annotation
 relationships.
-\item \code{activeHierarchies}: a character vector naming the hierarchies currently in
-use.
+\item \code{activeHierarchies}: a character vector naming the hierarchies currently
+in use.
 }
 }
 

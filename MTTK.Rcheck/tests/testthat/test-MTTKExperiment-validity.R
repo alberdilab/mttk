@@ -3,7 +3,7 @@ test_that("links must be named on construction", {
 
     expect_error(
         MTTKExperiment(
-            assays = list(rna_counts = counts),
+            assays = list(rna_gene_counts = counts),
             links = list(data.frame(gene_id = "gene_1", genome_id = "genome_1"))
         ),
         "named collection"
@@ -36,19 +36,7 @@ test_that("validity catches malformed metadata(x)$mttk values", {
     expect_error(methods::validObject(x), "must be a list")
 
     metadata_list <- S4Vectors::metadata(x)
-    bad_genome_data <- S4Vectors::DataFrame(genome_name = c("Genome A", "Genome B"))
-    rownames(bad_genome_data) <- c("genome_1", "genome_1")
     metadata_list$mttk <- list(
-        genomeData = bad_genome_data,
-        links = S4Vectors::SimpleList(),
-        activeHierarchies = character()
-    )
-    S4Vectors::metadata(x) <- metadata_list
-    expect_error(methods::validObject(x), "Row names of 'genomeData' must be unique")
-
-    metadata_list <- S4Vectors::metadata(x)
-    metadata_list$mttk <- list(
-        genomeData = S4Vectors::DataFrame(),
         links = S4Vectors::SimpleList(gene_to_genome = matrix(1:4, nrow = 2)),
         activeHierarchies = character()
     )
@@ -57,10 +45,52 @@ test_that("validity catches malformed metadata(x)$mttk values", {
 
     metadata_list <- S4Vectors::metadata(x)
     metadata_list$mttk <- list(
-        genomeData = S4Vectors::DataFrame(),
         links = S4Vectors::SimpleList(),
         activeHierarchies = c("biological", "biological")
     )
     S4Vectors::metadata(x) <- metadata_list
     expect_error(methods::validObject(x), "'activeHierarchies' must contain unique, non-empty names")
+})
+
+test_that("validity catches genome mappings that are missing from genomeExperiment", {
+    components <- make_test_components()
+    bad_genome_data <- components$genomeData["genome_1", , drop = FALSE]
+    bad_genome_assays <- list(
+        dna_genome_counts = components$genomeAssays$dna_genome_counts["genome_1", , drop = FALSE]
+    )
+
+    expect_error(
+        MTTKExperiment(
+            assays = components$assays,
+            rowData = components$rowData,
+            colData = components$colData,
+            genomeData = bad_genome_data,
+            genomeAssays = bad_genome_assays,
+            links = components$links,
+            activeHierarchies = components$activeHierarchies
+        ),
+        "All mapped genomes must be present in 'genomeExperiment\\(x\\)'"
+    )
+})
+
+test_that("validity rejects ambiguous assay names", {
+    counts <- matrix(1L, nrow = 1, ncol = 1, dimnames = list("gene_1", "sample_1"))
+
+    expect_error(
+        MTTKExperiment(assays = list(rna_counts = counts)),
+        "explicit gene-level names"
+    )
+
+    x <- MTTKExperiment(assays = list(rna_gene_counts = counts))
+    expect_error(
+        genomeExperiment(x) <- SummarizedExperiment::SummarizedExperiment(
+            assays = list(dna_counts = matrix(
+                1L,
+                nrow = 1,
+                ncol = 1,
+                dimnames = list("genome_1", "sample_1")
+            ))
+        ),
+        "explicit genome-level names"
+    )
 })

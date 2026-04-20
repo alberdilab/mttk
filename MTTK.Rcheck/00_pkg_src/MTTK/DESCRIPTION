@@ -20,8 +20,8 @@ Description: MTTK helps users organize genome-resolved
     differential expression, association analysis, aggregation, and
     visualization workflows.
 Depends: R (>= 4.3.0)
-Imports: methods, S4Vectors, SummarizedExperiment,
-        TreeSummarizedExperiment
+Imports: methods, SingleCellExperiment, S4Vectors,
+        SummarizedExperiment, TreeSummarizedExperiment
 Suggests: BiocStyle, knitr, rmarkdown, testthat (>= 3.0.0)
 VignetteBuilder: knitr
 License: Artistic-2.0
@@ -37,4 +37,4 @@ Config/testthat/edition: 3
 biocViews: Software, Infrastructure, Sequencing, RNASeq,
         GeneExpression, DifferentialExpression, Metagenomics
 NeedsCompilation: no
-Packaged: 2026-04-20 04:18:28 UTC; anttonalberdi
+Packaged: 2026-04-20 06:25:05 UTC; anttonalberdi

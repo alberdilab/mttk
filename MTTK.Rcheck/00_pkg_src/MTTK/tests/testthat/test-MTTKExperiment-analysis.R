@@ -8,14 +8,14 @@ test_that("aggregateToGenome sums assays and carries genome metadata", {
     expect_identical(rownames(aggregated), c("genome_1", "genome_2", "genome_3"))
     expect_identical(
         names(SummarizedExperiment::assays(aggregated, withDimnames = FALSE)),
-        c("rna_counts", "dna_counts")
+        "rna_genome_counts"
     )
     expect_identical(
-        SummarizedExperiment::assay(aggregated, "rna_counts"),
+        SummarizedExperiment::assay(aggregated, "rna_genome_counts"),
         rbind(
-            genome_1 = rnaCounts(x)["gene_1", ] + rnaCounts(x)["gene_2", ],
-            genome_2 = rnaCounts(x)["gene_3", ] + rnaCounts(x)["gene_4", ],
-            genome_3 = rnaCounts(x)["gene_5", ] + rnaCounts(x)["gene_6", ]
+            genome_1 = rnaGeneCounts(x)["gene_1", ] + rnaGeneCounts(x)["gene_2", ],
+            genome_2 = rnaGeneCounts(x)["gene_3", ] + rnaGeneCounts(x)["gene_4", ],
+            genome_3 = rnaGeneCounts(x)["gene_5", ] + rnaGeneCounts(x)["gene_6", ]
         )
     )
     expect_true(all(c("genome_name", "clade", "taxonomy") %in%
@@ -32,7 +32,7 @@ test_that("aggregateByLink follows multi-step functional mappings", {
     aggregated <- aggregateByLink(
         x,
         path = c("gene_to_ko", "ko_to_module"),
-        assays = "rna_counts"
+        assays = "rna_gene_counts"
     )
 
     expect_identical(rownames(aggregated), c("M001", "M002", "M003", "M004"))
@@ -41,12 +41,12 @@ test_that("aggregateByLink follows multi-step functional mappings", {
         c("M001", "M002", "M003", "M004")
     )
     expect_identical(
-        SummarizedExperiment::assay(aggregated, "rna_counts"),
+        SummarizedExperiment::assay(aggregated, "rna_gene_counts"),
         rbind(
-            M001 = rnaCounts(x)["gene_1", ] + rnaCounts(x)["gene_2", ],
-            M002 = rnaCounts(x)["gene_3", ],
-            M003 = rnaCounts(x)["gene_4", ],
-            M004 = rnaCounts(x)["gene_5", ] + rnaCounts(x)["gene_6", ]
+            M001 = rnaGeneCounts(x)["gene_1", ] + rnaGeneCounts(x)["gene_2", ],
+            M002 = rnaGeneCounts(x)["gene_3", ],
+            M003 = rnaGeneCounts(x)["gene_4", ],
+            M004 = rnaGeneCounts(x)["gene_5", ] + rnaGeneCounts(x)["gene_6", ]
         )
     )
 })
@@ -57,31 +57,32 @@ test_that("aggregateByLink can compute group means", {
     aggregated <- aggregateByLink(
         x,
         path = "gene_to_genome",
-        assays = "rna_counts",
+        assays = "rna_gene_counts",
         fun = "mean"
     )
 
     expected <- rbind(
-        genome_1 = (rnaCounts(x)["gene_1", ] + rnaCounts(x)["gene_2", ]) / 2,
-        genome_2 = (rnaCounts(x)["gene_3", ] + rnaCounts(x)["gene_4", ]) / 2,
-        genome_3 = (rnaCounts(x)["gene_5", ] + rnaCounts(x)["gene_6", ]) / 2
+        genome_1 = (rnaGeneCounts(x)["gene_1", ] + rnaGeneCounts(x)["gene_2", ]) / 2,
+        genome_2 = (rnaGeneCounts(x)["gene_3", ] + rnaGeneCounts(x)["gene_4", ]) / 2,
+        genome_3 = (rnaGeneCounts(x)["gene_5", ] + rnaGeneCounts(x)["gene_6", ]) / 2
     )
 
-    expect_equal(SummarizedExperiment::assay(aggregated, "rna_counts"), expected)
+    expect_equal(SummarizedExperiment::assay(aggregated, "rna_gene_counts"), expected)
 })
 
-test_that("summarizeActivity returns feature- and genome-level summaries", {
+test_that("summarizeActivity returns gene- and genome-level summaries", {
     x <- makeExampleMTTKExperiment()
+    gene_to_genome <- SummarizedExperiment::rowData(x)$genome_id
 
-    feature_activity <- summarizeActivity(x, by = "feature")
+    gene_activity <- summarizeActivity(x, by = "gene")
     genome_activity <- summarizeActivity(x, by = "genome")
 
-    expect_s4_class(feature_activity, "SummarizedExperiment")
+    expect_s4_class(gene_activity, "SummarizedExperiment")
     expect_s4_class(genome_activity, "SummarizedExperiment")
-    expect_identical(dim(feature_activity), c(6L, 4L))
+    expect_identical(dim(gene_activity), c(6L, 4L))
     expect_identical(dim(genome_activity), c(3L, 4L))
     expect_identical(
-        names(SummarizedExperiment::assays(feature_activity, withDimnames = FALSE)),
+        names(SummarizedExperiment::assays(gene_activity, withDimnames = FALSE)),
         "log2_activity"
     )
     expect_identical(
@@ -89,15 +90,27 @@ test_that("summarizeActivity returns feature- and genome-level summaries", {
         "log2_activity"
     )
 
-    genome_counts <- aggregateToGenome(x, assays = c("rna_counts", "dna_counts"))
-    expected <- log2(
-        (SummarizedExperiment::assay(genome_counts, "rna_counts") + 1) /
-            (SummarizedExperiment::assay(genome_counts, "dna_counts") + 1)
+    expected_gene <- log2(
+        (rnaGeneCounts(x) + 1) /
+            (dnaGenomeCounts(x)[match(gene_to_genome, rownames(dnaGenomeCounts(x))), , drop = FALSE] + 1)
+    )
+    rownames(expected_gene) <- rownames(x)
+
+    expected_genome <- log2(
+        (SummarizedExperiment::assay(
+            aggregateToGenome(x, assays = "rna_gene_counts"),
+            "rna_genome_counts"
+        ) + 1) /
+            (dnaGenomeCounts(x) + 1)
     )
 
     expect_equal(
+        SummarizedExperiment::assay(gene_activity, "log2_activity"),
+        expected_gene
+    )
+    expect_equal(
         SummarizedExperiment::assay(genome_activity, "log2_activity"),
-        expected
+        expected_genome
     )
     expect_identical(
         S4Vectors::metadata(genome_activity)$mttk_activity$by,
@@ -119,5 +132,9 @@ test_that("analysis helpers reject unknown assays and links", {
     expect_error(
         summarizeActivity(x, numeratorAssay = "missing_assay"),
         "Unknown assay name"
+    )
+    expect_error(
+        summarizeActivity(x, genomeAssay = "missing_assay"),
+        "Unknown genome assay name"
     )
 })

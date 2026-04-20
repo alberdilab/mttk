@@ -4,6 +4,11 @@ make_test_components <- function() {
         nrow = 2,
         dimnames = list(c("gene_1", "gene_2"), c("sample_1", "sample_2", "sample_3"))
     )
+    genome_counts <- matrix(
+        c(100L, 110L, 50L, 55L, 90L, 95L),
+        nrow = 2,
+        dimnames = list(c("genome_1", "genome_2"), c("sample_1", "sample_2", "sample_3"))
+    )
 
     row_data <- S4Vectors::DataFrame(
         gene_id = rownames(counts),
@@ -34,7 +39,8 @@ make_test_components <- function() {
     )
 
     list(
-        assays = list(rna_counts = counts),
+        assays = list(rna_gene_counts = counts),
+        genomeAssays = list(dna_genome_counts = genome_counts),
         rowData = row_data,
         colData = col_data,
         genomeData = genome_data,
@@ -45,6 +51,8 @@ make_test_components <- function() {
 
 make_test_mttk <- function(
     assays = NULL,
+    genomeAssays = NULL,
+    genomeExperiment = NULL,
     genomeData = NULL,
     links = NULL,
     activeHierarchies = NULL,
@@ -56,7 +64,11 @@ make_test_mttk <- function(
         assays <- components$assays
     }
 
-    if (is.null(genomeData)) {
+    if (is.null(genomeExperiment) && is.null(genomeAssays)) {
+        genomeAssays <- components$genomeAssays
+    }
+
+    if (is.null(genomeExperiment) && is.null(genomeData)) {
         genomeData <- components$genomeData
     }
 
@@ -72,6 +84,8 @@ make_test_mttk <- function(
         assays = assays,
         rowData = components$rowData,
         colData = components$colData,
+        genomeExperiment = genomeExperiment,
+        genomeAssays = genomeAssays,
         genomeData = genomeData,
         links = links,
         activeHierarchies = activeHierarchies,

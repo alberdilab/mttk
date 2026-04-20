@@ -24,6 +24,66 @@
     assays
 }
 
+.normalize_genome_analysis_assay <- function(x, assay) {
+    genome_experiment <- genomeExperiment(x)
+
+    if (is.null(genome_experiment)) {
+        stop(
+            "A genome-level assay is required in 'genomeExperiment(x)' before this analysis can be run.",
+            call. = FALSE
+        )
+    }
+
+    assay_names <- names(
+        SummarizedExperiment::assays(genome_experiment, withDimnames = FALSE)
+    )
+
+    if (length(assay_names) == 0L) {
+        stop(
+            "The genome-level experiment does not contain any assays to analyze.",
+            call. = FALSE
+        )
+    }
+
+    assay <- as.character(assay)
+
+    if (length(assay) != 1L || is.na(assay) || assay == "") {
+        stop("'genomeAssay' must be a single non-empty assay name.", call. = FALSE)
+    }
+
+    if (!(assay %in% assay_names)) {
+        stop("Unknown genome assay name: ", assay, ".", call. = FALSE)
+    }
+
+    assay
+}
+
+.aligned_genome_assay <- function(x, assay_name, genome_ids, output_rownames) {
+    genome_experiment <- genomeExperiment(x)
+    assay_mat <- SummarizedExperiment::assay(
+        genome_experiment,
+        assay_name,
+        withDimnames = TRUE
+    )
+    matched <- match(genome_ids, rownames(assay_mat))
+
+    if (anyNA(matched)) {
+        missing_ids <- unique(genome_ids[is.na(matched)])
+        stop(
+            "All requested genomes must be present in genome assay '",
+            assay_name,
+            "'. Missing: ",
+            paste(missing_ids, collapse = ", "),
+            ".",
+            call. = FALSE
+        )
+    }
+
+    aligned <- assay_mat[matched, , drop = FALSE]
+    rownames(aligned) <- output_rownames
+    aligned
+}
+
 .resolve_link_path <- function(x, path) {
     path <- as.character(path)
 
@@ -185,10 +245,10 @@
 
 #' Aggregate Assays Along a Link Path
 #'
-#' `aggregateByLink()` aggregates one or more assays in an `MTTKExperiment`
-#' along one or more explicit link tables. This makes it possible to summarize
-#' gene-level measurements to genomes, KOs, modules, pathways, or other mapped
-#' feature groups.
+#' `aggregateByLink()` aggregates one or more gene-level assays in an
+#' `MTTKExperiment` along one or more explicit link tables. This makes it
+#' possible to summarize RNA measurements to genomes, KOs, modules, pathways,
+#' or other mapped feature groups.
 #'
 #' The current implementation expects each link table in the path to be ordered
 #' as a two-column mapping from source IDs to target IDs. For example, the
@@ -255,7 +315,9 @@ aggregateByLink <- function(x, path, assays = NULL, fun = c("sum", "mean")) {
 #'
 #' `aggregateToGenome()` is a convenience wrapper around `aggregateByLink()` for
 #' the common case of aggregating gene-level measurements to genomes through the
-#' `gene_to_genome` link table.
+#' `gene_to_genome` link table. When an input assay name contains `"_gene_"`,
+#' the returned assay name is rewritten with `"_genome_"` so the level of the
+#' aggregated data remains explicit.
 #'
 #' @param x An `MTTKExperiment`.
 #' @param assays Character vector of assay names to aggregate. The default uses
@@ -270,19 +332,34 @@ aggregateByLink <- function(x, path, assays = NULL, fun = c("sum", "mean")) {
 #'
 #' @export
 aggregateToGenome <- function(x, assays = NULL, fun = c("sum", "mean")) {
-    aggregateByLink(
+    aggregated <- aggregateByLink(
         x = x,
         path = "gene_to_genome",
         assays = assays,
         fun = match.arg(fun)
     )
+
+    assay_list <- SummarizedExperiment::assays(aggregated, withDimnames = FALSE)
+    renamed_assays <- stats::setNames(
+        as.list(assay_list),
+        vapply(names(assay_list), .to_genome_assay_name, character(1))
+    )
+    SummarizedExperiment::assays(aggregated, withDimnames = FALSE) <- renamed_assays
+
+    S4Vectors::metadata(aggregated)$mttk_aggregation$output_assays <- names(
+        SummarizedExperiment::assays(aggregated, withDimnames = FALSE)
+    )
+
+    aggregated
 }
 
-#' Summarize RNA-over-DNA Activity
+#' Summarize Gene or Genome Activity
 #'
-#' `summarizeActivity()` computes a simple RNA-over-DNA activity summary from two
-#' assays, typically `rna_counts` and `dna_counts`. The summary can be computed
-#' at the feature level or after aggregation to genomes.
+#' `summarizeActivity()` computes a simple RNA-over-DNA activity summary from a
+#' gene-level RNA assay and a genome-level DNA assay. The summary can be
+#' computed for each gene by pairing every gene with the DNA abundance of its
+#' parent genome, or at the genome level after aggregating gene-level RNA to
+#' genomes.
 #'
 #' This function is intended as a first, transparent analysis helper for the
 #' packaged example data. It does not replace a formal statistical model, but it
@@ -290,11 +367,12 @@ aggregateToGenome <- function(x, assays = NULL, fun = c("sum", "mean")) {
 #' samples.
 #'
 #' @param x An `MTTKExperiment`.
-#' @param by Level at which activity should be summarized. `"feature"` uses the
-#'   assays as stored, while `"genome"` first aggregates both assays with
+#' @param by Level at which activity should be summarized. `"gene"` uses the
+#'   gene-level RNA assay together with the genome-level DNA assay, while
+#'   `"genome"` first aggregates the gene-level RNA assay with
 #'   `aggregateToGenome()`.
-#' @param numeratorAssay Assay used as the numerator.
-#' @param denominatorAssay Assay used as the denominator.
+#' @param numeratorAssay Gene-level assay used as the numerator.
+#' @param genomeAssay Genome-level assay used as the denominator.
 #' @param pseudocount Numeric pseudocount added to both assays before division.
 #' @param transform Activity scale. `"log2_ratio"` returns
 #'   `log2((numerator + pseudocount) / (denominator + pseudocount))`, while
@@ -306,15 +384,15 @@ aggregateToGenome <- function(x, assays = NULL, fun = c("sum", "mean")) {
 #' @examples
 #' x <- makeExampleMTTKExperiment()
 #'
-#' summarizeActivity(x, by = "feature")
+#' summarizeActivity(x, by = "gene")
 #' summarizeActivity(x, by = "genome")
 #'
 #' @export
 summarizeActivity <- function(
     x,
-    by = c("feature", "genome"),
-    numeratorAssay = "rna_counts",
-    denominatorAssay = "dna_counts",
+    by = c("gene", "genome"),
+    numeratorAssay = "rna_gene_counts",
+    genomeAssay = "dna_genome_counts",
     pseudocount = 1,
     transform = c("log2_ratio", "ratio")
 ) {
@@ -324,41 +402,45 @@ summarizeActivity <- function(
 
     by <- match.arg(by)
     transform <- match.arg(transform)
-    assay_names <- .normalize_analysis_assays(x, c(numeratorAssay, denominatorAssay))
+    numerator_assay <- .normalize_analysis_assays(x, numeratorAssay)
+    genome_assay <- .normalize_genome_analysis_assay(x, genomeAssay)
 
     if (!is.numeric(pseudocount) || length(pseudocount) != 1L || is.na(pseudocount) ||
         pseudocount < 0) {
         stop("'pseudocount' must be a single non-negative numeric value.", call. = FALSE)
     }
 
-    if (by == "feature") {
+    if (by == "gene") {
         numerator <- SummarizedExperiment::assay(
             x,
-            assay_names[[1L]],
+            numerator_assay,
             withDimnames = TRUE
         )
-        denominator <- SummarizedExperiment::assay(
-            x,
-            assay_names[[2L]],
-            withDimnames = TRUE
+        gene_to_genome <- .gene_to_genome_map(x)
+        denominator <- .aligned_genome_assay(
+            x = x,
+            assay_name = genome_assay,
+            genome_ids = unname(gene_to_genome),
+            output_rownames = names(gene_to_genome)
         )
         row_data <- SummarizedExperiment::rowData(x)
         col_data <- SummarizedExperiment::colData(x)
     } else {
         aggregated <- aggregateToGenome(
             x,
-            assays = assay_names,
+            assays = numerator_assay,
             fun = "sum"
         )
         numerator <- SummarizedExperiment::assay(
             aggregated,
-            assay_names[[1L]],
+            .to_genome_assay_name(numerator_assay),
             withDimnames = TRUE
         )
-        denominator <- SummarizedExperiment::assay(
-            aggregated,
-            assay_names[[2L]],
-            withDimnames = TRUE
+        denominator <- .aligned_genome_assay(
+            x = x,
+            assay_name = genome_assay,
+            genome_ids = rownames(aggregated),
+            output_rownames = rownames(aggregated)
         )
         row_data <- SummarizedExperiment::rowData(aggregated)
         col_data <- SummarizedExperiment::colData(aggregated)
@@ -377,8 +459,8 @@ summarizeActivity <- function(
             list(
                 mttk_activity = list(
                     by = by,
-                    numeratorAssay = assay_names[[1L]],
-                    denominatorAssay = assay_names[[2L]],
+                    numeratorAssay = numerator_assay,
+                    genomeAssay = genome_assay,
                     pseudocount = pseudocount,
                     transform = transform
                 )
