@@ -1,0 +1,6 @@
+.DS_Store
+.Rcheck/
+..Rcheck/
+MTTK.Rcheck/
+MTTK_*.tar.gz
+.rlib/
