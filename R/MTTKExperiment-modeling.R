@@ -24,6 +24,17 @@
                 call. = FALSE
             )
         }
+
+        reference_level <- levels(values)[1L]
+        contrast_level <- levels(values)[2L]
+        effect_label <- paste0(
+            variable,
+            ": ",
+            contrast_level,
+            " vs ",
+            reference_level
+        )
+        variable_type <- "two_level_factor"
     } else if (is.numeric(values) || is.integer(values)) {
         values <- as.numeric(values)
 
@@ -33,6 +44,11 @@
                 call. = FALSE
             )
         }
+
+        reference_level <- NA_character_
+        contrast_level <- NA_character_
+        effect_label <- paste0(variable, " per unit increase")
+        variable_type <- "numeric"
     } else {
         stop(
             "'variable' must refer to a numeric column or a factor/character column.",
@@ -44,7 +60,14 @@
         stop("'variable' must not contain missing values.", call. = FALSE)
     }
 
-    stats::setNames(values, sample_ids)
+    list(
+        name = variable,
+        values = stats::setNames(values, sample_ids),
+        type = variable_type,
+        referenceLevel = reference_level,
+        contrastLevel = contrast_level,
+        effectLabel = effect_label
+    )
 }
 
 .normalize_ko_model_lib_size <- function(x, libSize) {
@@ -130,6 +153,27 @@
     mapping
 }
 
+.ko_genome_pair_id <- function(ko_id, genome_id) {
+    if (length(ko_id) != length(genome_id)) {
+        stop("'ko_id' and 'genome_id' must have the same length.", call. = FALSE)
+    }
+
+    paste(ko_id, genome_id, sep = "::")
+}
+
+.ko_summary_from_aggregation <- function(x) {
+    state <- S4Vectors::metadata(x)$mttk_ko_aggregation
+
+    if (is.null(state) || is.null(state$koSummary)) {
+        stop(
+            "The KO/genome aggregation does not contain stored KO summary metadata.",
+            call. = FALSE
+        )
+    }
+
+    state$koSummary
+}
+
 .aggregate_rna_by_ko_genome <- function(x, assay_name) {
     gene_to_ko <- .gene_to_ko_link_df(x)
     gene_to_genome <- as.data.frame(.core_gene_to_genome_link(x))
@@ -152,7 +196,7 @@
     assay_mat <- SummarizedExperiment::assay(x, assay_name, withDimnames = TRUE)
     matched_genes <- match(mapping$gene_id, rownames(assay_mat))
     mapped_counts <- assay_mat[matched_genes, , drop = FALSE]
-    pair_id <- paste(mapping$ko_id, mapping$genome_id, sep = "\r")
+    pair_id <- .ko_genome_pair_id(mapping$ko_id, mapping$genome_id)
     pair_levels <- unique(pair_id)
 
     aggregated <- rowsum(
@@ -177,9 +221,16 @@
 
     genome_data <- genomeData(x)
     matched_rows <- match(pair_data$genome_id, rownames(genome_data))
-    if (all(!is.na(matched_rows))) {
-        pair_data <- cbind(pair_data, genome_data[matched_rows, , drop = FALSE])
-        rownames(pair_data) <- pair_ids
+    if (nrow(genome_data) > 0L && all(!is.na(matched_rows))) {
+        extra_columns <- setdiff(colnames(genome_data), colnames(pair_data))
+
+        if (length(extra_columns) > 0L) {
+            pair_data <- cbind(
+                pair_data,
+                genome_data[matched_rows, extra_columns, drop = FALSE]
+            )
+            rownames(pair_data) <- pair_ids
+        }
     }
 
     ko_ids <- unique(mapping$ko_id)
@@ -203,38 +254,43 @@
         row.names = ko_ids
     )
 
-    list(
-        mapping = mapping,
-        counts = aggregated,
-        pairData = pair_data,
+    out <- SummarizedExperiment::SummarizedExperiment(
+        assays = stats::setNames(list(aggregated), assay_name),
+        rowData = pair_data,
+        colData = SummarizedExperiment::colData(x)
+    )
+    S4Vectors::metadata(out)$mttk_ko_aggregation <- list(
+        sourceAssay = assay_name,
         koSummary = ko_summary
     )
+    out
 }
 
 .build_ko_model_observations <- function(
+    aggregated,
     x,
     variable,
     model,
-    assay_name,
     lib_size,
     genome_assay,
     offset_pseudocount
 ) {
-    aggregated <- .aggregate_rna_by_ko_genome(x, assay_name = assay_name)
-    pair_counts <- aggregated$counts
-    pair_data <- aggregated$pairData
+    assay_name <- S4Vectors::metadata(aggregated)$mttk_ko_aggregation$sourceAssay
+    pair_counts <- SummarizedExperiment::assay(aggregated, assay_name, withDimnames = TRUE)
+    pair_data <- SummarizedExperiment::rowData(aggregated)
     sample_ids <- colnames(pair_counts)
-    variable_values <- .normalize_ko_model_variable(x, variable)
+    variable_info <- .normalize_ko_model_variable(x, variable)
+    variable_values <- variable_info$values
 
     obs <- expand.grid(
-        pair_id = rownames(pair_counts),
+        ko_genome_id = rownames(pair_counts),
         sample_id = sample_ids,
         KEEP.OUT.ATTRS = FALSE,
         stringsAsFactors = FALSE
     )
     obs$rna_count <- as.numeric(as.vector(pair_counts))
 
-    matched_pairs <- match(obs$pair_id, rownames(pair_data))
+    matched_pairs <- match(obs$ko_genome_id, rownames(pair_data))
     obs$ko_id <- as.character(pair_data$ko_id[matched_pairs])
     obs$genome_id <- as.character(pair_data$genome_id[matched_pairs])
     obs$n_genes_pair <- as.integer(pair_data$n_genes_pair[matched_pairs])
@@ -270,10 +326,30 @@
         obs$genome_abundance_offset <- obs$genome_abundance + offset_pseudocount
     }
 
-    list(
-        observations = obs,
-        koSummary = aggregated$koSummary
+    out <- S4Vectors::DataFrame(obs, check.names = FALSE)
+    S4Vectors::metadata(out)$mttk_ko_model <- list(
+        variable = variable,
+        variableType = variable_info$type,
+        referenceLevel = variable_info$referenceLevel,
+        contrastLevel = variable_info$contrastLevel,
+        effectLabel = variable_info$effectLabel,
+        specification = model,
+        sourceAssay = assay_name,
+        libSizeSource = lib_size$source,
+        genomeAssay = if (identical(model, "library_plus_genome_abundance")) {
+            genome_assay
+        } else {
+            NA_character_
+        },
+        offsetPseudocount = if (identical(model, "library_plus_genome_abundance")) {
+            offset_pseudocount
+        } else {
+            NA_real_
+        },
+        koSummary = .ko_summary_from_aggregation(aggregated)
     )
+
+    out
 }
 
 .ko_model_formula <- function(variable, model) {
@@ -290,10 +366,14 @@
     stats::as.formula(paste("rna_count ~", paste(rhs, collapse = " + ")))
 }
 
-.empty_ko_model_row <- function(ko_id, ko_summary) {
+.empty_ko_model_row <- function(ko_id, ko_summary, variable_info) {
     S4Vectors::DataFrame(
         ko_id = ko_id,
         tested_term = NA_character_,
+        variable_type = variable_info$type,
+        reference_level = variable_info$referenceLevel,
+        contrast_level = variable_info$contrastLevel,
+        effect_label = variable_info$effectLabel,
         estimate = NA_real_,
         std_error = NA_real_,
         statistic = NA_real_,
@@ -318,8 +398,9 @@
     )
 }
 
-.fit_one_ko_mixed_model <- function(data, ko_id, ko_summary, variable, model, keep_fits) {
-    row <- .empty_ko_model_row(ko_id, ko_summary)
+.fit_one_ko_mixed_model <- function(data, ko_id, ko_summary, variable_info, model, keep_fits) {
+    variable <- variable_info$name
+    row <- .empty_ko_model_row(ko_id, ko_summary, variable_info = variable_info)
     row$n_observations <- nrow(data)
     row$n_nonzero_observations <- sum(data$rna_count > 0)
 
@@ -427,6 +508,121 @@
     )
 }
 
+#' Aggregate Gene RNA to KO-within-Genome Counts
+#'
+#' `aggregateToKOGenome()` collapses a gene-level assay to KO/genome pairs. The
+#' returned rows represent KO-within-genome observations, which are the units
+#' used by the first KO-level mixed-model workflow in MTTK.
+#'
+#' Row metadata always includes `ko_id`, `genome_id`, `n_genes_pair`, and
+#' `n_links_pair`. Available `genomeData(x)` columns are appended when they can
+#' be aligned unambiguously to the genome identifiers of the aggregated rows.
+#'
+#' @param x An `MTTKExperiment`.
+#' @param assay A single gene-level assay name to aggregate.
+#'
+#' @return A `SummarizedExperiment` with one row per KO/genome pair and one
+#'   column per sample.
+#'
+#' @examples
+#' x <- makeExampleMTTKExperiment()
+#' ko_genome <- aggregateToKOGenome(x)
+#' ko_genome
+#' SummarizedExperiment::rowData(ko_genome)[, c("ko_id", "genome_id")]
+#'
+#' @export
+aggregateToKOGenome <- function(x, assay = "rna_gene_counts") {
+    if (!methods::is(x, "MTTKExperiment")) {
+        stop("'x' must be an MTTKExperiment.", call. = FALSE)
+    }
+
+    assay_name <- .normalize_analysis_assays(x, assay)
+    if (length(assay_name) != 1L) {
+        stop("'assay' must be a single gene-level assay name.", call. = FALSE)
+    }
+
+    .aggregate_rna_by_ko_genome(x, assay_name = assay_name)
+}
+
+#' Build a KO Mixed-Model Data Table
+#'
+#' `makeKOMixedModelData()` materializes the long-form observation table used by
+#' [fitKOMixedModel()]. Each row corresponds to one KO/genome/sample
+#' observation, with RNA counts, sample-level covariates, and optional
+#' genome-abundance offsets aligned and ready for model fitting.
+#'
+#' The returned table is useful for inspecting the modeled data before fitting,
+#' or for reusing the same KO/genome aggregation in custom workflows.
+#'
+#' @param x An `MTTKExperiment`.
+#' @param variable A single sample-level column name from `colData(x)`. The
+#'   column must be numeric or a factor with exactly two levels.
+#' @param model Which of the two supported mixed-model specifications to
+#'   prepare.
+#' @param assay Gene-level assay name used as the RNA response.
+#' @param libSize Library-size offset specification. Use `NULL` to compute
+#'   `colSums(rnaGeneCounts(x))`, a single `colData(x)` column name, or a
+#'   numeric vector with one value per sample.
+#' @param genomeAssay Genome-level assay used when
+#'   `model = "library_plus_genome_abundance"`.
+#' @param offsetPseudocount Non-negative pseudocount added to genome abundance
+#'   before log-offset calculation.
+#'
+#' @return An `S4Vectors::DataFrame` with one row per KO/genome/sample
+#'   observation.
+#'
+#' @examples
+#' x <- makeExampleMTTKExperiment()
+#' model_data <- makeKOMixedModelData(x, variable = "condition")
+#' head(as.data.frame(model_data))
+#' S4Vectors::metadata(model_data)$mttk_ko_model$effectLabel
+#'
+#' @export
+makeKOMixedModelData <- function(
+    x,
+    variable,
+    model = c("library_only", "library_plus_genome_abundance"),
+    assay = "rna_gene_counts",
+    libSize = NULL,
+    genomeAssay = "dna_genome_counts",
+    offsetPseudocount = 1
+) {
+    if (!methods::is(x, "MTTKExperiment")) {
+        stop("'x' must be an MTTKExperiment.", call. = FALSE)
+    }
+
+    model <- match.arg(model)
+    assay_name <- .normalize_analysis_assays(x, assay)
+    if (length(assay_name) != 1L) {
+        stop("'assay' must be a single gene-level assay name.", call. = FALSE)
+    }
+
+    if (!is.numeric(offsetPseudocount) ||
+        length(offsetPseudocount) != 1L ||
+        is.na(offsetPseudocount) ||
+        offsetPseudocount < 0) {
+        stop("'offsetPseudocount' must be a single non-negative numeric value.", call. = FALSE)
+    }
+
+    lib_size <- .normalize_ko_model_lib_size(x, libSize = libSize)
+    genome_assay <- if (identical(model, "library_plus_genome_abundance")) {
+        .normalize_genome_analysis_assay(x, assay = genomeAssay)
+    } else {
+        NA_character_
+    }
+
+    aggregated <- aggregateToKOGenome(x, assay = assay_name)
+    .build_ko_model_observations(
+        aggregated = aggregated,
+        x = x,
+        variable = variable,
+        model = model,
+        lib_size = lib_size,
+        genome_assay = genome_assay,
+        offset_pseudocount = offsetPseudocount
+    )
+}
+
 #' Fit a KO-Level Mixed Model
 #'
 #' `fitKOMixedModel()` fits one negative-binomial mixed model per KO using
@@ -466,7 +662,8 @@
 #'     x <- makeExampleMTTKExperiment()
 #'     fit <- fitKOMixedModel(x, variable = "condition")
 #'     fit
-#'     as.data.frame(fit)
+#'     fitInfo(fit)$effectLabel
+#'     as.data.frame(fit)[, c("ko_id", "effect_label", "estimate", "q_value")]
 #' }
 #'
 #' @export
@@ -491,42 +688,33 @@ fitKOMixedModel <- function(
         )
     }
 
-    model <- match.arg(model)
-    assay_name <- .normalize_analysis_assays(x, assay)
-    if (length(assay_name) != 1L) {
-        stop("'assay' must be a single gene-level assay name.", call. = FALSE)
-    }
-    lib_size <- .normalize_ko_model_lib_size(x, libSize = libSize)
-
     if (!is.logical(keepFits) || length(keepFits) != 1L || is.na(keepFits)) {
         stop("'keepFits' must be TRUE or FALSE.", call. = FALSE)
     }
 
-    if (!is.numeric(offsetPseudocount) ||
-        length(offsetPseudocount) != 1L ||
-        is.na(offsetPseudocount) ||
-        offsetPseudocount < 0) {
-        stop("'offsetPseudocount' must be a single non-negative numeric value.", call. = FALSE)
-    }
-
-    genome_assay <- if (identical(model, "library_plus_genome_abundance")) {
-        .normalize_genome_analysis_assay(x, assay = genomeAssay)
-    } else {
-        NA_character_
-    }
-
-    model_data <- .build_ko_model_observations(
+    model_data <- makeKOMixedModelData(
         x = x,
         variable = variable,
         model = model,
-        assay_name = assay_name,
-        lib_size = lib_size,
-        genome_assay = genome_assay,
-        offset_pseudocount = offsetPseudocount
+        assay = assay,
+        libSize = libSize,
+        genomeAssay = genomeAssay,
+        offsetPseudocount = offsetPseudocount
     )
 
-    observations <- model_data$observations
-    ko_summary <- model_data$koSummary
+    observations <- as.data.frame(model_data)
+    model_state <- S4Vectors::metadata(model_data)$mttk_ko_model
+    model <- model_state$specification
+    ko_summary <- model_state$koSummary
+    assay_name <- model_state$sourceAssay
+    genome_assay <- model_state$genomeAssay
+    variable_info <- list(
+        name = variable,
+        type = model_state$variableType,
+        referenceLevel = model_state$referenceLevel,
+        contrastLevel = model_state$contrastLevel,
+        effectLabel = model_state$effectLabel
+    )
     ko_ids <- rownames(ko_summary)
 
     fitted_rows <- lapply(ko_ids, function(ko_id) {
@@ -535,7 +723,7 @@ fitKOMixedModel <- function(
             data = data_ko,
             ko_id = ko_id,
             ko_summary = ko_summary[ko_id, , drop = FALSE],
-            variable = variable,
+            variable_info = variable_info,
             model = model,
             keep_fits = keepFits
         )
@@ -565,15 +753,15 @@ fitKOMixedModel <- function(
         backend = "glmmTMB",
         model = "ko_mixed_model",
         variable = variable,
+        variableType = model_state$variableType,
+        referenceLevel = model_state$referenceLevel,
+        contrastLevel = model_state$contrastLevel,
+        effectLabel = model_state$effectLabel,
         specification = model,
         responseAssay = assay_name,
-        libSizeSource = lib_size$source,
+        libSizeSource = model_state$libSizeSource,
         genomeAssay = genome_assay,
-        offsetPseudocount = if (identical(model, "library_plus_genome_abundance")) {
-            offsetPseudocount
-        } else {
-            NA_real_
-        },
+        offsetPseudocount = model_state$offsetPseudocount,
         family = "nbinom2",
         formula = paste(deparse(formula), collapse = " "),
         n_features = nrow(results),

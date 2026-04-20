@@ -64,7 +64,8 @@ if (requireNamespace("glmmTMB", quietly = TRUE)) {
     x <- makeExampleMTTKExperiment()
     fit <- fitKOMixedModel(x, variable = "condition")
     fit
-    as.data.frame(fit)
+    fitInfo(fit)$effectLabel
+    as.data.frame(fit)[, c("ko_id", "effect_label", "estimate", "q_value")]
 }
 
 }

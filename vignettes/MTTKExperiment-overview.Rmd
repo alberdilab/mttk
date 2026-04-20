@@ -240,10 +240,32 @@ The first implementation supports two model specifications:
   `rna_count ~ variable + offset(log(lib_size)) + (1 | genome_id)`
 - `model = "library_plus_genome_abundance"` adds a genome-abundance offset
 
+The same workflow can be inspected in two explicit preparation steps before the
+model is fit:
+
+```{r}
+ko_genome <- aggregateToKOGenome(x)
+ko_genome
+SummarizedExperiment::rowData(ko_genome)[, c("ko_id", "genome_id", "n_genes_pair")]
+
+ko_model_data <- makeKOMixedModelData(x, variable = "condition")
+head(as.data.frame(ko_model_data))
+S4Vectors::metadata(ko_model_data)$mttk_ko_model$effectLabel
+```
+
 ```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
 ko_fit <- fitKOMixedModel(x, variable = "condition")
 ko_fit
-as.data.frame(ko_fit)[, c("ko_id", "estimate", "q_value", "status")]
+fitInfo(ko_fit)$effectLabel
+as.data.frame(ko_fit)[, c("ko_id", "effect_label", "estimate", "q_value", "status")]
+```
+
+The resulting `MTTKFit` can then be ranked, filtered, and annotated:
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+fitTable(ko_fit, sortBy = "q_value")
+significantResults(ko_fit)
+annotateKOFit(ko_fit, x)
 ```
 
 This workflow is aimed at KO-level differential expression or association
