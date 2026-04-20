@@ -9,8 +9,19 @@ test_that("replacement accessors update an MTTKExperiment", {
         nrow = 1,
         dimnames = list("genome_1", c("sample_1", "sample_2"))
     )
+    row_data <- S4Vectors::DataFrame(
+        genome_id = c("genome_1", "genome_1"),
+        row.names = c("gene_1", "gene_2")
+    )
+    col_data <- S4Vectors::DataFrame(
+        row.names = c("sample_1", "sample_2")
+    )
 
-    x <- MTTKExperiment(assays = list(rna_gene_counts = gene_counts))
+    x <- MTTKExperiment(
+        assays = list(rna_gene_counts = gene_counts),
+        rowData = row_data,
+        colData = col_data
+    )
 
     genomeData(x) <- data.frame(
         genome_name = "Genome A",
@@ -94,8 +105,19 @@ test_that("genome-level count accessors can create and update the genome experim
         nrow = 1,
         dimnames = list("genome_1", c("sample_1", "sample_2"))
     )
+    row_data <- S4Vectors::DataFrame(
+        genome_id = c("genome_1", "genome_1"),
+        row.names = c("gene_1", "gene_2")
+    )
+    col_data <- S4Vectors::DataFrame(
+        row.names = c("sample_1", "sample_2")
+    )
 
-    x <- MTTKExperiment(assays = list(rna_gene_counts = counts))
+    x <- MTTKExperiment(
+        assays = list(rna_gene_counts = counts),
+        rowData = row_data,
+        colData = col_data
+    )
     dnaGenomeCounts(x) <- genome_counts
     rnaGenomeCounts(x) <- genome_counts + 100L
 

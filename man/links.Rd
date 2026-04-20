@@ -28,5 +28,19 @@ returns an updated \code{MTTKExperiment}.
 \description{
 \code{links()} returns the named collection of mapping tables stored in an
 \code{MTTKExperiment}. These tables can represent relationships such as
-gene-to-genome, gene-to-annotation, or annotation-to-parent mappings.
+gene-to-annotation or annotation-to-parent mappings. The core nesting of
+genes within genomes is defined by \code{rowData(x)$genome_id}; a stored
+\code{gene_to_genome} table is optional and, when present, must mirror that
+column exactly.
+}
+\details{
+The first two columns of each link table are treated as the source and target
+identifier columns. They should therefore use explicit identifier names such
+as \code{gene_id}, \code{ko_id}, \code{module_id}, or \code{pathway_id}. A non-core link table
+is valid only when its source identifiers match canonical IDs already stored
+in the object or target identifiers introduced by another link table.
+
+When an \code{MTTKExperiment} is subset by rows, link tables whose source IDs are
+downstream of the retained genes are pruned so the remaining mappings stay
+consistent with the subsetted object.
 }

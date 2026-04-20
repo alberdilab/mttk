@@ -5,12 +5,12 @@
 
     rna_gene_counts <- matrix(
         c(
-            120L, 110L, 210L, 230L,
-            35L, 30L, 70L, 80L,
-            90L, 95L, 130L, 140L,
-            12L, 10L, 18L, 22L,
-            60L, 58L, 40L, 38L,
-            18L, 20L, 12L, 10L
+            120L, 110L, 230L, 250L,
+            40L, 35L, 42L, 38L,
+            90L, 95L, 170L, 180L,
+            70L, 75L, 40L, 35L,
+            55L, 60L, 58L, 56L,
+            30L, 28L, 15L, 12L
         ),
         nrow = length(gene_ids),
         byrow = TRUE,
@@ -46,7 +46,7 @@
             "genome_3",
             "genome_3"
         ),
-        ko_id = c("K03043", "K02111", "K01915", "K00368", "K00198", "K00123")
+        ko_id = c("K03043", "K02111", "K03043", "K00368", "K02111", "K00368")
     )
     rownames(row_data) <- gene_ids
 
@@ -79,12 +79,12 @@
             ko_id = row_data$ko_id
         ),
         ko_to_module = S4Vectors::DataFrame(
-            ko_id = c("K03043", "K02111", "K01915", "K00368", "K00198", "K00123"),
-            module_id = c("M001", "M001", "M002", "M003", "M004", "M004")
+            ko_id = c("K03043", "K02111", "K00368"),
+            module_id = c("M001", "M002", "M003")
         ),
         module_to_pathway = S4Vectors::DataFrame(
-            module_id = c("M001", "M002", "M003", "M004"),
-            pathway_id = c("map00970", "map00910", "map00920", "map00680")
+            module_id = c("M001", "M002", "M003"),
+            pathway_id = c("map00970", "map00910", "map00920")
         )
     )
 

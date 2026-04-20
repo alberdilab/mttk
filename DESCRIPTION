@@ -28,6 +28,7 @@ Imports:
     TreeSummarizedExperiment
 Suggests:
     BiocStyle,
+    glmmTMB,
     knitr,
     rmarkdown,
     testthat (>= 3.0.0)
@@ -42,7 +43,10 @@ Collate:
     'MTTKExperiment-class.R'
     'MTTKExperiment.R'
     'MTTKExperiment-accessors.R'
+    'MTTKFit-class.R'
+    'MTTKFit.R'
     'MTTKExperiment-analysis.R'
+    'MTTKExperiment-modeling.R'
     'MTTKExample.R'
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2

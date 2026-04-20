@@ -186,7 +186,20 @@ methods::setReplaceMethod("genomeData", "MTTKExperiment", function(x, value) {
 #'
 #' `links()` returns the named collection of mapping tables stored in an
 #' `MTTKExperiment`. These tables can represent relationships such as
-#' gene-to-genome, gene-to-annotation, or annotation-to-parent mappings.
+#' gene-to-annotation or annotation-to-parent mappings. The core nesting of
+#' genes within genomes is defined by `rowData(x)$genome_id`; a stored
+#' `gene_to_genome` table is optional and, when present, must mirror that
+#' column exactly.
+#'
+#' The first two columns of each link table are treated as the source and target
+#' identifier columns. They should therefore use explicit identifier names such
+#' as `gene_id`, `ko_id`, `module_id`, or `pathway_id`. A non-core link table
+#' is valid only when its source identifiers match canonical IDs already stored
+#' in the object or target identifiers introduced by another link table.
+#'
+#' When an `MTTKExperiment` is subset by rows, link tables whose source IDs are
+#' downstream of the retained genes are pruned so the remaining mappings stay
+#' consistent with the subsetted object.
 #'
 #' @param x An `MTTKExperiment`.
 #' @param value For replacement methods, a named `S4Vectors::SimpleList`, a

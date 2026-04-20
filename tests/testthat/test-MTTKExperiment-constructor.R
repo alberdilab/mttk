@@ -18,9 +18,9 @@ test_that("constructor respects existing metadata(x)$mttk defaults", {
         mttk = list(
             links = methods::as(
                 list(
-                    gene_to_genome = S4Vectors::DataFrame(
+                    gene_to_custom = S4Vectors::DataFrame(
                         gene_id = c("gene_1", "gene_2"),
-                        genome_id = c("genome_x", "genome_x")
+                        custom_id = c("custom_a", "custom_b")
                     )
                 ),
                 "SimpleList"
@@ -40,7 +40,7 @@ test_that("constructor respects existing metadata(x)$mttk defaults", {
     expect_identical(S4Vectors::metadata(x)$study_id, "test-study")
     expect_null(genomeExperiment(x))
     expect_identical(nrow(genomeData(x)), 0L)
-    expect_identical(names(links(x)), "gene_to_genome")
+    expect_identical(names(links(x)), "gene_to_custom")
     expect_identical(activeHierarchies(x), "custom_hierarchy")
 })
 
@@ -49,9 +49,9 @@ test_that("dedicated constructor arguments override metadata(x)$mttk", {
         mttk = list(
             links = methods::as(
                 list(
-                    gene_to_genome = S4Vectors::DataFrame(
+                    gene_to_custom = S4Vectors::DataFrame(
                         gene_id = c("gene_1", "gene_2"),
-                        genome_id = c("genome_x", "genome_x")
+                        custom_id = c("custom_a", "custom_b")
                     )
                 ),
                 "SimpleList"

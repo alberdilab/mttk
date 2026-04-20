@@ -22,7 +22,14 @@ MTTKExperiment(
 \arguments{
 \item{...}{Arguments passed to
 \code{\link[TreeSummarizedExperiment:TreeSummarizedExperiment-constructor]{TreeSummarizedExperiment::TreeSummarizedExperiment()}}, typically including
-gene-level \code{assays}, \code{rowData}, \code{colData}, and \code{metadata}.}
+gene-level \code{assays}, \code{rowData}, \code{colData}, and \code{metadata}. \code{rowData}
+should include a \code{genome_id} column that records the parent genome of each
+gene. Gene row names are treated as the canonical \code{gene_id} values, sample
+column names are treated as the canonical \code{sample_id} values, and
+genome-level row names are treated as the canonical \code{genome_id} values.
+Mirrored metadata columns such as \code{rowData(x)$gene_id},
+\code{colData(x)$sample_id}, and \code{genomeData(x)$genome_id} are optional but
+must match those canonical identifiers exactly when present.}
 
 \item{rowTree, colTree}{Optional row and column trees passed to
 \code{TreeSummarizedExperiment()}.}
@@ -45,7 +52,9 @@ assays without building \code{genomeExperiment} by hand.}
 \code{rowData(genomeExperiment(x))}.}
 
 \item{links}{A named \code{S4Vectors::SimpleList} or named \code{list} of mapping
-tables. Each entry must be an \code{S4Vectors::DataFrame} or \code{data.frame}.}
+tables. Each entry must be an \code{S4Vectors::DataFrame} or \code{data.frame}. A
+\code{gene_to_genome} table is optional because the core nesting is defined by
+\code{rowData(x)$genome_id}; if supplied, it must match that column exactly.}
 
 \item{activeHierarchies}{Character vector naming the hierarchies currently in
 use.}

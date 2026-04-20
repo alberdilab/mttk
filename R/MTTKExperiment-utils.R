@@ -127,6 +127,395 @@
     x
 }
 
+.normalize_feature_ids <- function(x) {
+    feature_ids <- rownames(x)
+
+    if (nrow(x) > 0L &&
+        (is.null(feature_ids) || anyNA(feature_ids) || any(feature_ids == ""))) {
+        stop(
+            "Gene-level row names must be present, non-missing, and non-empty.",
+            call. = FALSE
+        )
+    }
+
+    if (!is.null(feature_ids) && anyDuplicated(feature_ids)) {
+        stop("Gene-level row names must be unique.", call. = FALSE)
+    }
+
+    feature_ids
+}
+
+.normalize_sample_ids <- function(x) {
+    sample_ids <- colnames(x)
+
+    if (ncol(x) > 0L &&
+        (is.null(sample_ids) || anyNA(sample_ids) || any(sample_ids == ""))) {
+        stop(
+            "Sample column names must be present, non-missing, and non-empty.",
+            call. = FALSE
+        )
+    }
+
+    if (!is.null(sample_ids) && anyDuplicated(sample_ids)) {
+        stop("Sample column names must be unique.", call. = FALSE)
+    }
+
+    sample_ids
+}
+
+.validate_id_mirror <- function(ids, data, column, mirror_label, canonical_label) {
+    if (!(column %in% names(data))) {
+        return(NULL)
+    }
+
+    mirrored_ids <- as.character(data[[column]])
+
+    if (length(mirrored_ids) != length(ids) ||
+        anyNA(mirrored_ids) ||
+        any(mirrored_ids == "")) {
+        return(
+            paste0(
+                "'",
+                mirror_label,
+                "' must contain one non-empty identifier for every entry when present."
+            )
+        )
+    }
+
+    if (!identical(mirrored_ids, as.character(ids))) {
+        return(
+            paste0(
+                "'",
+                mirror_label,
+                "' must match '",
+                canonical_label,
+                "' exactly when present."
+            )
+        )
+    }
+
+    NULL
+}
+
+.core_gene_to_genome_link <- function(x) {
+    feature_ids <- .normalize_feature_ids(x)
+    row_data <- SummarizedExperiment::rowData(x)
+
+    if (!("genome_id" %in% names(row_data))) {
+        stop(
+            "rowData(x) must contain a 'genome_id' column for the core gene-to-genome nesting.",
+            call. = FALSE
+        )
+    }
+
+    genome_ids <- as.character(row_data$genome_id)
+
+    if (length(genome_ids) != nrow(x) ||
+        anyNA(genome_ids) ||
+        any(genome_ids == "")) {
+        stop(
+            "'rowData(x)$genome_id' must contain one non-empty genome identifier for every gene.",
+            call. = FALSE
+        )
+    }
+
+    S4Vectors::DataFrame(
+        gene_id = feature_ids,
+        genome_id = genome_ids,
+        row.names = feature_ids
+    )
+}
+
+.gene_to_genome_link_df <- function(x) {
+    as.data.frame(.core_gene_to_genome_link(x))
+}
+
+.link_columns <- function(link_table) {
+    column_names <- names(link_table)
+
+    if (length(column_names) < 2L) {
+        return(NULL)
+    }
+
+    stats::setNames(column_names[1:2], c("source", "target"))
+}
+
+.link_spec <- function(link_table, link_name) {
+    link_cols <- .link_columns(link_table)
+
+    if (is.null(link_cols)) {
+        return(list(
+            problems = paste0(
+                "Link table '",
+                link_name,
+                "' must contain at least two columns."
+            )
+        ))
+    }
+
+    source_col <- link_cols[["source"]]
+    target_col <- link_cols[["target"]]
+    problems <- character()
+
+    if (anyNA(c(source_col, target_col)) || any(c(source_col, target_col) == "")) {
+        problems <- c(
+            problems,
+            paste0(
+                "The first two columns of link table '",
+                link_name,
+                "' must be named."
+            )
+        )
+    }
+
+    if (!all(grepl("_id$", c(source_col, target_col)))) {
+        problems <- c(
+            problems,
+            paste0(
+                "The first two columns of link table '",
+                link_name,
+                "' must be identifier columns ending in '_id'."
+            )
+        )
+    }
+
+    source_ids <- as.character(link_table[[source_col]])
+    target_ids <- as.character(link_table[[target_col]])
+
+    if (length(source_ids) != nrow(link_table) ||
+        anyNA(source_ids) ||
+        any(source_ids == "")) {
+        problems <- c(
+            problems,
+            paste0(
+                "Column '",
+                source_col,
+                "' in link table '",
+                link_name,
+                "' must contain one non-empty identifier for every row."
+            )
+        )
+    }
+
+    if (length(target_ids) != nrow(link_table) ||
+        anyNA(target_ids) ||
+        any(target_ids == "")) {
+        problems <- c(
+            problems,
+            paste0(
+                "Column '",
+                target_col,
+                "' in link table '",
+                link_name,
+                "' must contain one non-empty identifier for every row."
+            )
+        )
+    }
+
+    if (length(problems) > 0L) {
+        return(list(problems = problems))
+    }
+
+    list(
+        problems = character(),
+        source_col = source_col,
+        target_col = target_col,
+        source_ids = source_ids,
+        target_ids = target_ids
+    )
+}
+
+.validate_link_referential_integrity <- function(link_tables, known_ids) {
+    if (is.null(link_tables) ||
+        !methods::is(link_tables, "SimpleList") ||
+        length(link_tables) == 0L) {
+        return(character())
+    }
+
+    link_specs <- list()
+    problems <- character()
+
+    for (link_name in names(link_tables)) {
+        if (identical(link_name, "gene_to_genome")) {
+            next
+        }
+
+        spec <- .link_spec(link_tables[[link_name]], link_name)
+        problems <- c(problems, spec$problems)
+
+        if (length(spec$problems) == 0L) {
+            link_specs[[link_name]] <- spec
+        }
+    }
+
+    if (length(link_specs) == 0L) {
+        return(problems)
+    }
+
+    remaining <- link_specs
+    progressed <- TRUE
+
+    while (progressed && length(remaining) > 0L) {
+        progressed <- FALSE
+        next_remaining <- list()
+
+        for (link_name in names(remaining)) {
+            spec <- remaining[[link_name]]
+            source_pool <- known_ids[[spec$source_col]]
+
+            if (is.null(source_pool)) {
+                next_remaining[[link_name]] <- spec
+                next
+            }
+
+            source_pool <- unique(as.character(source_pool))
+            source_pool <- source_pool[!is.na(source_pool) & source_pool != ""]
+            source_ids <- unique(spec$source_ids)
+            missing_ids <- setdiff(source_ids, source_pool)
+
+            if (length(missing_ids) > 0L) {
+                problems <- c(
+                    problems,
+                    paste0(
+                        "Link table '",
+                        link_name,
+                        "' contains ",
+                        spec$source_col,
+                        " values that are not defined in the object or upstream links: ",
+                        .format_preview(missing_ids),
+                        "."
+                    )
+                )
+            }
+
+            matched_rows <- spec$source_ids %in% source_pool
+            reached_targets <- unique(spec$target_ids[matched_rows])
+            reached_targets <- reached_targets[!is.na(reached_targets) & reached_targets != ""]
+
+            old_targets <- known_ids[[spec$target_col]]
+            new_targets <- if (is.null(old_targets)) {
+                reached_targets
+            } else {
+                unique(c(as.character(old_targets), reached_targets))
+            }
+
+            if (is.null(old_targets) || !identical(old_targets, new_targets)) {
+                known_ids[[spec$target_col]] <- new_targets
+                progressed <- TRUE
+            }
+        }
+
+        remaining <- next_remaining
+    }
+
+    if (length(remaining) > 0L) {
+        for (link_name in names(remaining)) {
+            spec <- remaining[[link_name]]
+            problems <- c(
+                problems,
+                paste0(
+                    "Link table '",
+                    link_name,
+                    "' has an unresolved source namespace '",
+                    spec$source_col,
+                    "'. Its source IDs must match canonical IDs in the object or the target IDs produced by another link table."
+                )
+            )
+        }
+    }
+
+    unique(problems)
+}
+
+.subset_links_after_rows <- function(x, link_list) {
+    link_list <- .normalize_links(link_list)
+
+    if (length(link_list) == 0L) {
+        return(link_list)
+    }
+
+    keep_gene_to_genome <- "gene_to_genome" %in% names(link_list)
+    working_links <- as.list(link_list)
+
+    if (keep_gene_to_genome) {
+        working_links[["gene_to_genome"]] <- .core_gene_to_genome_link(x)
+    }
+
+    retained_ids <- list(
+        gene_id = .normalize_feature_ids(x),
+        genome_id = unique(as.character(.core_gene_to_genome_link(x)$genome_id))
+    )
+
+    changed <- TRUE
+    while (changed) {
+        changed <- FALSE
+
+        for (link_name in names(working_links)) {
+            link_table <- working_links[[link_name]]
+            link_cols <- .link_columns(link_table)
+
+            if (is.null(link_cols)) {
+                next
+            }
+
+            source_ids <- retained_ids[[link_cols[["source"]]]]
+            if (is.null(source_ids)) {
+                next
+            }
+
+            keep <- as.character(link_table[[link_cols[["source"]]]]) %in% source_ids
+            target_ids <- unique(as.character(link_table[[link_cols[["target"]]]][keep]))
+            target_ids <- target_ids[!is.na(target_ids) & target_ids != ""]
+
+            old_target_ids <- retained_ids[[link_cols[["target"]]]]
+            new_target_ids <- if (is.null(old_target_ids)) {
+                target_ids
+            } else {
+                unique(c(old_target_ids, target_ids))
+            }
+
+            if (is.null(old_target_ids) || !identical(old_target_ids, new_target_ids)) {
+                retained_ids[[link_cols[["target"]]]] <- new_target_ids
+                changed <- TRUE
+            }
+        }
+    }
+
+    pruned_links <- lapply(names(working_links), function(link_name) {
+        link_table <- working_links[[link_name]]
+        link_cols <- .link_columns(link_table)
+
+        if (is.null(link_cols)) {
+            return(link_table)
+        }
+
+        source_ids <- retained_ids[[link_cols[["source"]]]]
+        if (is.null(source_ids)) {
+            return(link_table)
+        }
+
+        keep <- as.character(link_table[[link_cols[["source"]]]]) %in% source_ids
+        link_table[keep, , drop = FALSE]
+    })
+    names(pruned_links) <- names(working_links)
+
+    methods::as(pruned_links, "SimpleList")
+}
+
+.prune_genome_experiment_after_rows <- function(x) {
+    genome_experiment <- .get_genome_experiment(x)
+
+    if (is.null(genome_experiment)) {
+        return(x)
+    }
+
+    kept_genomes <- unique(as.character(.core_gene_to_genome_link(x)$genome_id))
+    keep <- rownames(genome_experiment) %in% kept_genomes
+    genome_experiment <- genome_experiment[keep, , drop = FALSE]
+
+    .set_genome_experiment(x, genome_experiment)
+}
+
 .normalize_gene_experiment <- function(x) {
     if (methods::is(x, "MTTKExperiment")) {
         return(.as_tree_summarized_experiment(x))
@@ -525,67 +914,8 @@
 }
 
 .gene_to_genome_map <- function(x) {
-    feature_ids <- rownames(x)
-
-    if (is.null(feature_ids) || anyNA(feature_ids) || any(feature_ids == "")) {
-        stop(
-            "Gene-level row names must be present before gene-to-genome mappings can be used.",
-            call. = FALSE
-        )
-    }
-
-    row_data <- SummarizedExperiment::rowData(x)
-    if ("genome_id" %in% names(row_data)) {
-        genome_ids <- as.character(row_data$genome_id)
-
-        if (anyNA(genome_ids) || any(genome_ids == "")) {
-            stop(
-                "'rowData(x)$genome_id' must contain non-empty genome identifiers.",
-                call. = FALSE
-            )
-        }
-
-        stats::setNames(genome_ids, feature_ids)
-    } else {
-        link_list <- links(x)
-
-        if (!("gene_to_genome" %in% names(link_list))) {
-            stop(
-                "A gene-to-genome mapping is required in 'rowData(x)$genome_id' or links(x)[['gene_to_genome']].",
-                call. = FALSE
-            )
-        }
-
-        link_table <- as.data.frame(link_list[["gene_to_genome"]])
-
-        if (ncol(link_table) < 2L) {
-            stop(
-                "The 'gene_to_genome' link table must contain at least two columns.",
-                call. = FALSE
-            )
-        }
-
-        link_table <- unique(link_table[, 1:2, drop = FALSE])
-        names(link_table) <- c("gene_id", "genome_id")
-
-        if (anyDuplicated(link_table$gene_id)) {
-            stop(
-                "The 'gene_to_genome' link table must map each gene to exactly one genome.",
-                call. = FALSE
-            )
-        }
-
-        matched <- match(feature_ids, link_table$gene_id)
-
-        if (anyNA(matched)) {
-            stop(
-                "Every gene must map to a genome before genome-aware analyses can be run.",
-                call. = FALSE
-            )
-        }
-
-        stats::setNames(as.character(link_table$genome_id[matched]), feature_ids)
-    }
+    link_table <- .core_gene_to_genome_link(x)
+    stats::setNames(as.character(link_table$genome_id), link_table$gene_id)
 }
 
 .to_genome_assay_name <- function(assay_name) {
@@ -621,6 +951,57 @@
         )
     }
 
+    gene_ids <- tryCatch(
+        .normalize_feature_ids(object),
+        error = function(e) {
+            problems <<- c(problems, conditionMessage(e))
+            NULL
+        }
+    )
+    sample_ids <- tryCatch(
+        .normalize_sample_ids(object),
+        error = function(e) {
+            problems <<- c(problems, conditionMessage(e))
+            NULL
+        }
+    )
+
+    if (!is.null(gene_ids)) {
+        gene_id_problem <- .validate_id_mirror(
+            ids = gene_ids,
+            data = SummarizedExperiment::rowData(object),
+            column = "gene_id",
+            mirror_label = "rowData(x)$gene_id",
+            canonical_label = "rownames(x)"
+        )
+
+        if (!is.null(gene_id_problem)) {
+            problems <- c(problems, gene_id_problem)
+        }
+    }
+
+    if (!is.null(sample_ids)) {
+        sample_id_problem <- .validate_id_mirror(
+            ids = sample_ids,
+            data = SummarizedExperiment::colData(object),
+            column = "sample_id",
+            mirror_label = "colData(x)$sample_id",
+            canonical_label = "colnames(x)"
+        )
+
+        if (!is.null(sample_id_problem)) {
+            problems <- c(problems, sample_id_problem)
+        }
+    }
+
+    core_gene_to_genome <- tryCatch(
+        .core_gene_to_genome_link(object),
+        error = function(e) {
+            problems <<- c(problems, conditionMessage(e))
+            NULL
+        }
+    )
+
     genome_experiment <- .get_genome_experiment(object)
     if (!is.null(genome_experiment)) {
         tryCatch(
@@ -650,6 +1031,18 @@
                     ". Use names such as 'rna_genome_counts' or 'dna_genome_counts'."
                 )
             )
+        }
+
+        genome_id_problem <- .validate_id_mirror(
+            ids = rownames(genome_experiment),
+            data = SummarizedExperiment::rowData(genome_experiment),
+            column = "genome_id",
+            mirror_label = "genomeData(x)$genome_id",
+            canonical_label = "rownames(genomeExperiment(x))"
+        )
+
+        if (!is.null(genome_id_problem)) {
+            problems <- c(problems, genome_id_problem)
         }
     }
 
@@ -691,6 +1084,63 @@
         }
     }
 
+    if (!is.null(core_gene_to_genome) &&
+        !is.null(link_tables) &&
+        methods::is(link_tables, "SimpleList") &&
+        "gene_to_genome" %in% names(link_tables)) {
+        gene_to_genome_link <- link_tables[["gene_to_genome"]]
+
+        if (!all(c("gene_id", "genome_id") %in% names(gene_to_genome_link))) {
+            problems <- c(
+                problems,
+                "The 'gene_to_genome' link table must contain 'gene_id' and 'genome_id' columns."
+            )
+        } else {
+            link_df <- as.data.frame(
+                gene_to_genome_link[, c("gene_id", "genome_id"), drop = FALSE]
+            )
+
+            if (anyDuplicated(link_df$gene_id)) {
+                problems <- c(
+                    problems,
+                    "The 'gene_to_genome' link table must map each gene to exactly one genome."
+                )
+            } else if (!setequal(link_df$gene_id, core_gene_to_genome$gene_id)) {
+                problems <- c(
+                    problems,
+                    "The 'gene_to_genome' link table must describe the same genes as rowData(x)$genome_id."
+                )
+            } else {
+                matched <- match(core_gene_to_genome$gene_id, link_df$gene_id)
+                link_genome_ids <- as.character(link_df$genome_id[matched])
+
+                if (!identical(link_genome_ids, as.character(core_gene_to_genome$genome_id))) {
+                    problems <- c(
+                        problems,
+                        "The 'gene_to_genome' link table must match rowData(x)$genome_id exactly."
+                    )
+                }
+            }
+        }
+    }
+
+    if (!is.null(link_tables) &&
+        methods::is(link_tables, "SimpleList")) {
+        known_ids <- list(
+            gene_id = gene_ids,
+            sample_id = sample_ids
+        )
+
+        if (!is.null(core_gene_to_genome)) {
+            known_ids[["genome_id"]] <- unique(as.character(core_gene_to_genome$genome_id))
+        }
+
+        problems <- c(
+            problems,
+            .validate_link_referential_integrity(link_tables, known_ids)
+        )
+    }
+
     hierarchy_names <- if (is.null(mttk)) NULL else mttk[["activeHierarchies"]]
     if (!is.null(hierarchy_names)) {
         if (!is.character(hierarchy_names)) {
@@ -710,12 +1160,11 @@
 
     if (!is.null(genome_experiment)) {
         genome_ids <- rownames(genome_experiment)
-        gene_to_genome <- tryCatch(
-            .gene_to_genome_map(object),
-            error = function(e) NULL
-        )
-
-        if (!is.null(gene_to_genome)) {
+        if (!is.null(core_gene_to_genome)) {
+            gene_to_genome <- stats::setNames(
+                as.character(core_gene_to_genome$genome_id),
+                core_gene_to_genome$gene_id
+            )
             missing_genomes <- setdiff(unique(unname(gene_to_genome)), genome_ids)
 
             if (length(missing_genomes) > 0L) {

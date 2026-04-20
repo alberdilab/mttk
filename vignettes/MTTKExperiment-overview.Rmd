@@ -38,6 +38,8 @@ An `MTTKExperiment` stores information at several levels:
 - `geneAssays(x)` stores gene-level matrices such as RNA counts, normalized RNA
   values, offsets, fitted values, or residuals.
 - `rowData(x)` stores feature-level metadata for genes or transcripts.
+  The column `rowData(x)$genome_id` is the authoritative gene-to-genome
+  mapping.
 - `colData(x)` stores sample-level metadata.
 - `genomeExperiment(x)` stores genome-level assays with one row per genome.
 - `genomeAssays(x)` stores the assay collection attached to
@@ -57,12 +59,49 @@ measurements are stored separately:
 - `MTTKExperiment` itself is the gene-level experiment,
 - `geneExperiment(x)` and `geneAssays(x)` give that layer an explicit name,
 - genome-level assays live in `genomeExperiment(x)`,
+- the core gene-to-genome nesting lives in `rowData(x)$genome_id`,
 - explicit mapping tables and hierarchy labels remain easy to inspect through
   `links(x)` and `activeHierarchies(x)`.
 
 This makes the common metatranscriptomic layout explicit: genes have RNA
 counts, aggregated genome RNA can be stored separately, genomes have DNA
 abundances, and genes are linked back to genomes.
+
+# Identifier contract
+
+MTTK now treats the row and column names of the core containers as canonical
+identifiers.
+
+- `rownames(x)` are the canonical gene identifiers,
+- `colnames(x)` are the canonical sample identifiers,
+- `rownames(genomeExperiment(x))` are the canonical genome identifiers.
+
+Metadata columns that mirror those identifiers are optional, but they must
+agree exactly when present:
+
+- `rowData(x)$gene_id` must match `rownames(x)`,
+- `colData(x)$sample_id` must match `colnames(x)`,
+- `genomeData(x)$genome_id` must match `rownames(genomeExperiment(x))`.
+
+This keeps downstream modeling and aggregation code anchored to one
+unambiguous set of gene, sample, and genome IDs.
+
+# Link table contract
+
+The first two columns of each table in `links(x)` are treated as the source and
+target identifier columns.
+
+- they should use explicit names ending in `_id`,
+- a source namespace such as `gene_id` or `genome_id` can resolve directly
+  against canonical IDs in the object,
+- a downstream source namespace such as `ko_id` or `module_id` must be
+  introduced as a target namespace by another link table,
+- `gene_to_genome` is the one special case: it is optional and, if stored, it
+  must mirror `rowData(x)$genome_id` exactly.
+
+This means that chains such as `gene_to_ko -> ko_to_module ->
+module_to_pathway` are valid because each source namespace is anchored either
+in the object itself or in an upstream link target.
 
 # Current package structure
 
@@ -189,13 +228,61 @@ These helpers currently return `SummarizedExperiment` objects rather than a new
 `MTTKExperiment`, because the aggregated features are no longer genes and the
 appropriate hierarchy metadata may differ from the original object.
 
+# KO-level mixed models
+
+The first hierarchy-aware modeling workflow in MTTK fits one mixed model per
+KO. Gene-level RNA counts are first aggregated to KO-within-genome
+observations, and the model is then fit with `glmmTMB`.
+
+The first implementation supports two model specifications:
+
+- `model = "library_only"` uses
+  `rna_count ~ variable + offset(log(lib_size)) + (1 | genome_id)`
+- `model = "library_plus_genome_abundance"` adds a genome-abundance offset
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+ko_fit <- fitKOMixedModel(x, variable = "condition")
+ko_fit
+as.data.frame(ko_fit)[, c("ko_id", "estimate", "q_value", "status")]
+```
+
+This workflow is aimed at KO-level differential expression or association
+analysis, where each KO may be observed in multiple genomes and the genome term
+should be modeled explicitly as a random intercept.
+
+# Subsetting behavior
+
+`MTTKExperiment` now defines explicit subsetting behavior for the nested
+gene/genome layout.
+
+- row subsetting keeps the selected genes,
+- the genome-level companion experiment is pruned to the genomes still
+  referenced by `rowData(x)$genome_id`,
+- dependent link tables are pruned to identifiers that remain reachable from
+  the retained genes,
+- column subsetting narrows both the gene-level and genome-level assays to the
+  selected samples.
+
+This keeps ordinary `x[i, j]` operations consistent with the biological nesting
+stored in the object.
+
+```{r}
+x_small <- x[1:2, 1:2]
+x_small
+names(links(x_small))
+genomeData(x_small)
+```
+
 # What is explicit in the first version
 
 The current package version deliberately keeps link tables explicit and
 inspectable. It does not yet impose a rigid schema for every mapping table, and
 it does not yet automatically reinterpret arbitrary mapping tables during
-subsetting or aggregation. That behavior can be added later once the core link
-schemas are stabilized.
+subsetting. The one exception is the core biological nesting of genes within
+genomes, which is defined directly by `rowData(x)$genome_id`. A stored
+`gene_to_genome` link is therefore optional and, when present, must mirror that
+column exactly. Broader link-handling rules can be tightened later once the
+remaining link schemas are stabilized.
 
 This conservative design keeps the first implementation predictable:
 

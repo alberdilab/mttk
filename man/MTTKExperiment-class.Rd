@@ -23,11 +23,21 @@ The core assay container is inherited from
 the \code{MTTKExperiment} itself is the gene-level experiment.
 \item \code{geneAssays(x)} hold gene-level measurements such as RNA counts,
 normalized RNA values, offsets, fitted values, or residuals.
+\item \code{rownames(x)} are the canonical gene identifiers used throughout the
+container.
 \item \code{rowData} stores feature-level metadata for genes or transcripts.
+The column \code{rowData(x)$genome_id} is the authoritative gene-to-genome
+mapping used by the container. If \code{rowData(x)$gene_id} is present, it must
+match \code{rownames(x)} exactly.
+\item \code{colnames(x)} are the canonical sample identifiers used throughout the
+container. If \code{colData(x)$sample_id} is present, it must match
+\code{colnames(x)} exactly.
 \item \code{colData} stores sample-level metadata.
 \item \code{genomeExperiment(x)} stores genome-level assays such as genome DNA counts
 or aggregated genome RNA counts in a dedicated companion experiment with
-one row per genome.
+one row per genome. \code{rownames(genomeExperiment(x))} are the canonical
+genome identifiers. If \code{genomeData(x)$genome_id} is present, it must match
+those row names exactly.
 \item \code{genomeAssays(x)} names the assay collection stored in
 \code{genomeExperiment(x)}.
 \item \code{rowTree} and \code{rowLinks} can store optional named hierarchies when a
@@ -40,13 +50,22 @@ relationship is naturally tree-structured.
 MTTK-specific components are kept close to existing Bioconductor
 infrastructure:
 \itemize{
+\item \code{rownames(x)}, \code{colnames(x)}, and \code{rownames(genomeExperiment(x))} are the
+canonical gene, sample, and genome identifiers used by the package.
+\item \code{rowData(x)$genome_id} defines the core biological nesting of genes within
+genomes.
 \item \code{genomeData(x)} is stored as \code{rowData(genomeExperiment(x))}.
 \item explicit assay names such as \code{"rna_gene_counts"}, \code{"rna_genome_counts"},
 and \code{"dna_genome_counts"} make it clear which data layer an assay belongs
 to.
 \item \code{links}: a named \code{S4Vectors::SimpleList} of mapping tables, such as
-gene-to-genome links, gene-to-annotation links, or parent-child annotation
-relationships.
+gene-to-annotation links or parent-child annotation relationships. A
+stored \code{gene_to_genome} link is optional and, when present, must match
+\code{rowData(x)$genome_id} exactly. For other link tables, the first two
+columns are interpreted as source and target identifier columns and should
+use explicit \verb{*_id} names. Their source identifiers must resolve to
+canonical IDs already stored in the object or to target identifiers
+introduced by another link table.
 \item \code{activeHierarchies}: a character vector naming the hierarchies currently
 in use.
 }

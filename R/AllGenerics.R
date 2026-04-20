@@ -117,3 +117,15 @@ methods::setGeneric("dnaGenomeCounts", function(x, withDimnames = TRUE) {
 methods::setGeneric("dnaGenomeCounts<-", function(x, value) {
     standardGeneric("dnaGenomeCounts<-")
 })
+
+#' @rdname fitInfo
+#' @export
+methods::setGeneric("fitInfo", function(x) {
+    standardGeneric("fitInfo")
+})
+
+#' @rdname modelObjects
+#' @export
+methods::setGeneric("modelObjects", function(x) {
+    standardGeneric("modelObjects")
+})

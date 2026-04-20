@@ -26,6 +26,29 @@ test_that("aggregateToGenome sums assays and carries genome metadata", {
     )
 })
 
+test_that("genome aggregation uses rowData genome ids as the authoritative nesting", {
+    x <- makeExampleMTTKExperiment()
+    kept_links <- links(x)
+    kept_links$gene_to_genome <- NULL
+    links(x) <- kept_links
+
+    aggregated <- aggregateToGenome(x)
+
+    expect_identical(
+        names(links(x)),
+        c("gene_to_ko", "ko_to_module", "module_to_pathway")
+    )
+    expect_identical(rownames(aggregated), c("genome_1", "genome_2", "genome_3"))
+    expect_identical(
+        SummarizedExperiment::assay(aggregated, "rna_genome_counts"),
+        rbind(
+            genome_1 = rnaGeneCounts(x)["gene_1", ] + rnaGeneCounts(x)["gene_2", ],
+            genome_2 = rnaGeneCounts(x)["gene_3", ] + rnaGeneCounts(x)["gene_4", ],
+            genome_3 = rnaGeneCounts(x)["gene_5", ] + rnaGeneCounts(x)["gene_6", ]
+        )
+    )
+})
+
 test_that("aggregateByLink follows multi-step functional mappings", {
     x <- makeExampleMTTKExperiment()
 
@@ -35,18 +58,17 @@ test_that("aggregateByLink follows multi-step functional mappings", {
         assays = "rna_gene_counts"
     )
 
-    expect_identical(rownames(aggregated), c("M001", "M002", "M003", "M004"))
+    expect_identical(rownames(aggregated), c("M001", "M002", "M003"))
     expect_identical(
         SummarizedExperiment::rowData(aggregated)$module_id,
-        c("M001", "M002", "M003", "M004")
+        c("M001", "M002", "M003")
     )
     expect_identical(
         SummarizedExperiment::assay(aggregated, "rna_gene_counts"),
         rbind(
-            M001 = rnaGeneCounts(x)["gene_1", ] + rnaGeneCounts(x)["gene_2", ],
-            M002 = rnaGeneCounts(x)["gene_3", ],
-            M003 = rnaGeneCounts(x)["gene_4", ],
-            M004 = rnaGeneCounts(x)["gene_5", ] + rnaGeneCounts(x)["gene_6", ]
+            M001 = rnaGeneCounts(x)["gene_1", ] + rnaGeneCounts(x)["gene_3", ],
+            M002 = rnaGeneCounts(x)["gene_2", ] + rnaGeneCounts(x)["gene_5", ],
+            M003 = rnaGeneCounts(x)["gene_4", ] + rnaGeneCounts(x)["gene_6", ]
         )
     )
 })

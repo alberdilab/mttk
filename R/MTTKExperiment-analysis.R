@@ -100,7 +100,8 @@
     }
 
     link_list <- links(x)
-    missing_links <- setdiff(path, names(link_list))
+    available_links <- union(names(link_list), "gene_to_genome")
+    missing_links <- setdiff(path, available_links)
 
     if (length(missing_links) > 0L) {
         stop(
@@ -121,7 +122,11 @@
     target_column <- "group_id"
 
     for (link_name in path) {
-        link_table <- as.data.frame(link_list[[link_name]])
+        link_table <- if (identical(link_name, "gene_to_genome")) {
+            .gene_to_genome_link_df(x)
+        } else {
+            as.data.frame(link_list[[link_name]])
+        }
 
         if (ncol(link_table) < 2L) {
             stop(
@@ -251,9 +256,14 @@
 #' or other mapped feature groups.
 #'
 #' The current implementation expects each link table in the path to be ordered
-#' as a two-column mapping from source IDs to target IDs. For example, the
-#' packaged example data can be aggregated from genes to modules with
-#' `path = c("gene_to_ko", "ko_to_module")`.
+#' as a two-column mapping from source IDs to target IDs. Those first two
+#' columns should use explicit identifier names such as `gene_id`, `ko_id`, or
+#' `module_id`. For example, the packaged example data can be aggregated from
+#' genes to modules with
+#' `path = c("gene_to_ko", "ko_to_module")`. The special path
+#' `"gene_to_genome"` is resolved from the authoritative
+#' `rowData(x)$genome_id` mapping, so it does not require a stored
+#' `links(x)[["gene_to_genome"]]` table.
 #'
 #' @param x An `MTTKExperiment`.
 #' @param path Character vector naming one or more link tables stored in
@@ -315,7 +325,7 @@ aggregateByLink <- function(x, path, assays = NULL, fun = c("sum", "mean")) {
 #'
 #' `aggregateToGenome()` is a convenience wrapper around `aggregateByLink()` for
 #' the common case of aggregating gene-level measurements to genomes through the
-#' `gene_to_genome` link table. When an input assay name contains `"_gene_"`,
+#' core `rowData(x)$genome_id` mapping. When an input assay name contains `"_gene_"`,
 #' the returned assay name is rewritten with `"_genome_"` so the level of the
 #' aggregated data remains explicit.
 #'

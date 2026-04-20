@@ -29,9 +29,14 @@ or other mapped feature groups.
 }
 \details{
 The current implementation expects each link table in the path to be ordered
-as a two-column mapping from source IDs to target IDs. For example, the
-packaged example data can be aggregated from genes to modules with
-\code{path = c("gene_to_ko", "ko_to_module")}.
+as a two-column mapping from source IDs to target IDs. Those first two
+columns should use explicit identifier names such as \code{gene_id}, \code{ko_id}, or
+\code{module_id}. For example, the packaged example data can be aggregated from
+genes to modules with
+\code{path = c("gene_to_ko", "ko_to_module")}. The special path
+\code{"gene_to_genome"} is resolved from the authoritative
+\code{rowData(x)$genome_id} mapping, so it does not require a stored
+\code{links(x)[["gene_to_genome"]]} table.
 }
 \examples{
 x <- makeExampleMTTKExperiment()
