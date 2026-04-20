@@ -1,0 +1,16 @@
+BiocStyle-defunct       Defunct functions in package 'BiocStyle'
+helpers                 Specify Rmarkdown document metadata
+html_document           Use Bioconductor style to format R Markdown
+                        HTML output
+latex                   Use Bioconductor style to format LaTeX
+                        vignettes
+macros                  Link to packages on Bioconductor, CRAN and
+                        GitHub
+markdown                Use Bioconductor CSS style to format HTML
+                        vignettes
+md_document             Convert to a BiocStyle markdown document
+output                  Output format of an R Markdown document
+pdf_document            Use Bioconductor style to format R Markdown PDF
+                        output
+use_vignette_html       Create 'Rmd' vignette templates for HTML or PDF
+                        output

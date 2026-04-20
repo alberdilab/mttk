@@ -1,0 +1,178 @@
+---
+title: "MTTKExperiment Overview"
+author: "MTTK authors"
+package: MTTK
+output:
+    rmarkdown::html_vignette:
+        toc: true
+vignette: >
+    %\VignetteIndexEntry{MTTKExperiment Overview}
+    %\VignetteEngine{knitr::rmarkdown}
+    %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+# Overview
+
+MTTK is designed for genome-resolved metatranscriptomics where features are not
+just a flat list of genes. Genes belong to genomes, genomes belong to a
+community, and genes may also participate in parallel annotation systems such as
+KEGG orthologs, modules, pathways, or learned co-expression modules.
+
+The first version of the package focuses on one main container:
+`MTTKExperiment`.
+
+`MTTKExperiment` extends
+`TreeSummarizedExperiment::TreeSummarizedExperiment`, which means it inherits a
+well-established Bioconductor representation for assays, feature metadata,
+sample metadata, and optional trees.
+
+# Container design
+
+An `MTTKExperiment` stores information at several levels:
+
+- `assays(x)` stores matrices such as RNA counts, DNA counts, normalized values,
+  offsets, fitted values, or residuals.
+- `rowData(x)` stores feature-level metadata for genes or transcripts.
+- `colData(x)` stores sample-level metadata.
+- `genomeData(x)` stores one row per genome.
+- `links(x)` stores explicit mapping tables such as gene-to-genome,
+  gene-to-annotation, or annotation-to-parent relationships.
+- `activeHierarchies(x)` records which hierarchies are currently active in a
+  given analysis context.
+- `rowTree(x)` and `rowLinks(x)` can store true tree-structured hierarchies when
+  a hierarchy is naturally represented as a tree.
+
+The important design choice in this early version is that genome metadata and
+explicit mapping tables are stored transparently in `metadata(x)$mttk`. This
+keeps the class close to existing Bioconductor infrastructure and makes the
+stored information easy to inspect.
+
+# Current package structure
+
+At the moment the package is organized around a small number of source files:
+
+- `R/AllGenerics.R` defines the public accessor generics.
+- `R/MTTKExperiment-class.R` defines the S4 class and its validity method.
+- `R/MTTKExperiment.R` defines the constructor and display method.
+- `R/MTTKExperiment-accessors.R` defines the public accessors and replacement
+  methods.
+- `R/MTTKExperiment-analysis.R` defines the first aggregation and activity
+  helpers for running simple analyses on an `MTTKExperiment`.
+- `R/MTTKExperiment-utils.R` contains normalization and validation helpers used
+  internally by the package.
+
+This keeps the container layer small and easy to extend before modeling,
+network, and aggregation layers are added.
+
+# A small example
+
+The package includes both a ready-to-use example object and a helper function
+that constructs the same object from code.
+
+```{r}
+library(MTTK)
+x <- makeExampleMTTKExperiment()
+
+x
+```
+
+The same object is also available as packaged data.
+
+```{r}
+data("MTTKExample")
+MTTKExample
+```
+
+# Working with accessors
+
+The package provides a small set of explicit accessors for the MTTK-specific
+parts of the object.
+
+```{r}
+genomeData(x)
+```
+
+```{r}
+names(links(x))
+```
+
+```{r}
+activeHierarchies(x)
+```
+
+```{r}
+rnaCounts(x)
+```
+
+Assay convenience accessors follow a fixed naming convention. In the current
+implementation:
+
+- `rnaCounts(x)` reads or sets the assay named `"rna_counts"`.
+- `dnaCounts(x)` reads or sets the assay named `"dna_counts"`.
+
+# Running simple analyses
+
+The first analysis helpers focus on transparent summaries that work directly
+with explicit link tables.
+
+Genome-level aggregation:
+
+```{r}
+genome_counts <- aggregateToGenome(x)
+genome_counts
+```
+
+Aggregation through a multi-step functional path:
+
+```{r}
+module_counts <- aggregateByLink(
+    x,
+    path = c("gene_to_ko", "ko_to_module"),
+    assays = "rna_counts"
+)
+
+module_counts
+```
+
+RNA-over-DNA activity summaries:
+
+```{r}
+feature_activity <- summarizeActivity(x, by = "feature")
+genome_activity <- summarizeActivity(x, by = "genome")
+
+feature_activity
+genome_activity
+```
+
+These helpers currently return `SummarizedExperiment` objects rather than a new
+`MTTKExperiment`, because the aggregated features are no longer genes and the
+appropriate hierarchy metadata may differ from the original object.
+
+# What is explicit in the first version
+
+The current package version deliberately keeps link tables explicit and
+inspectable. It does not yet impose a rigid schema for every mapping table, and
+it does not yet automatically reinterpret arbitrary mapping tables during
+subsetting or aggregation. That behavior can be added later once the core link
+schemas are stabilized.
+
+This conservative design keeps the first implementation predictable:
+
+- assays live in standard Bioconductor assay storage,
+- sample and feature metadata stay in standard Bioconductor slots,
+- genome-level metadata and mapping tables remain easy to inspect,
+- future modeling and network layers can build on the same container without
+  changing the basic object layout.
+
+# Next steps
+
+The next implementation layers are expected to add:
+
+- helper utilities for common link schemas,
+- model-fitting interfaces,
+- aggregation and summarization helpers,
+- network and module-oriented analysis classes.

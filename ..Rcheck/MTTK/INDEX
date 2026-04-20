@@ -1,0 +1,15 @@
+activeHierarchies,MTTKExperiment-method
+                        Active Hierarchies
+dnaCounts,MTTKExperiment-method
+                        DNA Count Assay
+genomeData,MTTKExperiment-method
+                        Genome-Level Metadata
+links,MTTKExperiment-method
+                        Explicit Mapping Tables
+makeExampleMTTKExperiment
+                        Create the Packaged Example 'MTTKExperiment'
+MTTKExample             Example 'MTTKExperiment'
+MTTKExperiment          MTTKExperiment Class
+MTTKExperiment          Construct an MTTKExperiment
+rnaCounts,MTTKExperiment-method
+                        RNA Count Assay

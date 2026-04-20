@@ -1,0 +1,204 @@
+
+R version 4.3.3 (2024-02-29) -- "Angel Food Cake"
+Copyright (C) 2024 The R Foundation for Statistical Computing
+Platform: aarch64-apple-darwin20 (64-bit)
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+  Natural language support but running in an English locale
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+> pkgname <- "MTTK"
+> source(file.path(R.home("share"), "R", "examples-header.R"))
+> options(warn = 1)
+> library('MTTK')
+> 
+> base::assign(".oldSearch", base::search(), pos = 'CheckExEnv')
+> base::assign(".old_wd", base::getwd(), pos = 'CheckExEnv')
+> cleanEx()
+> nameEx("MTTKExample")
+> ### * MTTKExample
+> 
+> flush(stderr()); flush(stdout())
+> 
+> ### Name: MTTKExample
+> ### Title: Example 'MTTKExperiment'
+> ### Aliases: MTTKExample
+> ### Keywords: datasets
+> 
+> ### ** Examples
+> 
+> data("MTTKExample")
+> MTTKExample
+MTTKExperiment with 6 features and 4 samples
+assays(2): rna_counts, dna_counts
+rowData names(4): gene_id, gene_name, genome_id, ko_id
+colData names(4): sample_id, condition, site, pH
+genomeData rows(3): 3
+links(4): gene_to_genome, gene_to_ko, ko_to_module, module_to_pathway
+activeHierarchies(2): biological_origin, functional_annotation
+rowTreeNames(0): none
+colTreeNames(0): none
+> genomeData(MTTKExample)
+DataFrame with 3 rows and 3 columns
+         genome_name       clade               taxonomy
+         <character> <character>            <character>
+genome_1    Genome A Clade Alpha Bacteria; Proteobact..
+genome_2    Genome B  Clade Beta Bacteria; Bacteroidota
+genome_3    Genome C Clade Gamma Archaea; Thermoprote..
+> 
+> 
+> 
+> 
+> cleanEx()
+> nameEx("aggregateByLink")
+> ### * aggregateByLink
+> 
+> flush(stderr()); flush(stdout())
+> 
+> ### Name: aggregateByLink
+> ### Title: Aggregate Assays Along a Link Path
+> ### Aliases: aggregateByLink
+> 
+> ### ** Examples
+> 
+> x <- makeExampleMTTKExperiment()
+> 
+> aggregateByLink(x, path = "gene_to_genome")
+class: SummarizedExperiment 
+dim: 3 4 
+metadata(4): study_name study_design mttk mttk_aggregation
+assays(2): rna_counts dna_counts
+rownames(3): genome_1 genome_2 genome_3
+rowData names(6): genome_id n_features ... clade taxonomy
+colnames(4): sample_1 sample_2 sample_3 sample_4
+colData names(4): sample_id condition site pH
+> aggregateByLink(x, path = c("gene_to_ko", "ko_to_module"))
+class: SummarizedExperiment 
+dim: 4 4 
+metadata(4): study_name study_design mttk mttk_aggregation
+assays(2): rna_counts dna_counts
+rownames(4): M001 M002 M003 M004
+rowData names(3): module_id n_features n_links
+colnames(4): sample_1 sample_2 sample_3 sample_4
+colData names(4): sample_id condition site pH
+> 
+> 
+> 
+> 
+> cleanEx()
+> nameEx("aggregateToGenome")
+> ### * aggregateToGenome
+> 
+> flush(stderr()); flush(stdout())
+> 
+> ### Name: aggregateToGenome
+> ### Title: Aggregate Assays to the Genome Level
+> ### Aliases: aggregateToGenome
+> 
+> ### ** Examples
+> 
+> x <- makeExampleMTTKExperiment()
+> aggregateToGenome(x)
+class: SummarizedExperiment 
+dim: 3 4 
+metadata(4): study_name study_design mttk mttk_aggregation
+assays(2): rna_counts dna_counts
+rownames(3): genome_1 genome_2 genome_3
+rowData names(6): genome_id n_features ... clade taxonomy
+colnames(4): sample_1 sample_2 sample_3 sample_4
+colData names(4): sample_id condition site pH
+> 
+> 
+> 
+> 
+> cleanEx()
+> nameEx("makeExampleMTTKExperiment")
+> ### * makeExampleMTTKExperiment
+> 
+> flush(stderr()); flush(stdout())
+> 
+> ### Name: makeExampleMTTKExperiment
+> ### Title: Create the Packaged Example 'MTTKExperiment'
+> ### Aliases: makeExampleMTTKExperiment
+> 
+> ### ** Examples
+> 
+> x <- makeExampleMTTKExperiment()
+> x
+MTTKExperiment with 6 features and 4 samples
+assays(2): rna_counts, dna_counts
+rowData names(4): gene_id, gene_name, genome_id, ko_id
+colData names(4): sample_id, condition, site, pH
+genomeData rows(3): 3
+links(4): gene_to_genome, gene_to_ko, ko_to_module, module_to_pathway
+activeHierarchies(2): biological_origin, functional_annotation
+rowTreeNames(0): none
+colTreeNames(0): none
+> names(links(x))
+[1] "gene_to_genome"    "gene_to_ko"        "ko_to_module"     
+[4] "module_to_pathway"
+> 
+> 
+> 
+> 
+> cleanEx()
+> nameEx("summarizeActivity")
+> ### * summarizeActivity
+> 
+> flush(stderr()); flush(stdout())
+> 
+> ### Name: summarizeActivity
+> ### Title: Summarize RNA-over-DNA Activity
+> ### Aliases: summarizeActivity
+> 
+> ### ** Examples
+> 
+> x <- makeExampleMTTKExperiment()
+> 
+> summarizeActivity(x, by = "feature")
+class: SummarizedExperiment 
+dim: 6 4 
+metadata(4): study_name study_design mttk mttk_activity
+assays(1): log2_activity
+rownames(6): gene_1 gene_2 ... gene_5 gene_6
+rowData names(4): gene_id gene_name genome_id ko_id
+colnames(4): sample_1 sample_2 sample_3 sample_4
+colData names(4): sample_id condition site pH
+> summarizeActivity(x, by = "genome")
+class: SummarizedExperiment 
+dim: 3 4 
+metadata(4): study_name study_design mttk mttk_activity
+assays(1): log2_activity
+rownames(3): genome_1 genome_2 genome_3
+rowData names(6): genome_id n_features ... clade taxonomy
+colnames(4): sample_1 sample_2 sample_3 sample_4
+colData names(4): sample_id condition site pH
+> 
+> 
+> 
+> 
+> ### * <FOOTER>
+> ###
+> cleanEx()
+> options(digits = 7L)
+> base::cat("Time elapsed: ", proc.time() - base::get("ptime", pos = 'CheckExEnv'),"\n")
+Time elapsed:  3.115 0.121 3.307 0 0 
+> grDevices::dev.off()
+null device 
+          1 
+> ###
+> ### Local variables: ***
+> ### mode: outline-minor ***
+> ### outline-regexp: "\\(> \\)?### [*]+" ***
+> ### End: ***
+> quit('no')

@@ -1,0 +1,13 @@
+activeHierarchies       Active Hierarchies
+aggregateByLink         Aggregate Assays Along a Link Path
+aggregateToGenome       Aggregate Assays to the Genome Level
+dnaCounts               DNA Count Assay
+genomeData              Genome-Level Metadata
+links                   Explicit Mapping Tables
+makeExampleMTTKExperiment
+                        Create the Packaged Example 'MTTKExperiment'
+MTTKExample             Example 'MTTKExperiment'
+MTTKExperiment          Construct an MTTKExperiment
+MTTKExperiment-class    MTTKExperiment Class
+rnaCounts               RNA Count Assay
+summarizeActivity       Summarize RNA-over-DNA Activity

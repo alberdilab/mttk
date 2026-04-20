@@ -1,0 +1,31 @@
+.background {
+  color: #F0F0F0;
+}
+.num { /* Numeric */
+  color: #D02070;
+}
+.str { /* String */
+  color: #40A040;
+}
+.com { /* Comment */
+  color: #808080;
+  font-style: italic;
+}
+.opt { /* Operator */
+  color: #000000;
+}
+.std { /* Regular code */
+  color: #404040;
+}
+.kwa { /* Keyword */
+  color: #2020F0;
+}
+.kwb { /* <-, = and -> */
+  color: #000000;
+}
+.kwc { /* Function args */
+  color: #404040;
+}
+.kwd { /* Function name */
+  color: #E07020;
+}

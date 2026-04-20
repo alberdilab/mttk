@@ -1,0 +1,221 @@
+CHANGES IN VERSION 2.30.0
+------------------------
+
+BUG FIXES
+
+    o Addressed issue where code chunks in HTML output did not have the
+    correct background colour
+    o Fixed incompatibility with ragged2e LaTeX package distributed in
+    TexLive 2023
+    (https://github.com/Bioconductor/BiocStyle/issues/105)
+
+CHANGES IN VERSION 2.28.0
+------------------------
+
+BUG FIXES
+
+    o Addressed issue where, when using newer versions of Pandoc, footnotes 
+    would appear at the bottom of HTML output rather than be moved to 
+    the margin.
+    o Fixed problem including references in R Markdown documents when the
+    output format was BiocStyle::pdf_document
+    (https://github.com/Bioconductor/BiocStyle/issues/94)
+
+CHANGES IN VERSION 2.24.0
+------------------------
+
+BUG FIXES
+
+    o Fixed incompatibility with recent versions of the longtable latex package
+    when producing a PDF vignette.  This bug manifested with the message
+    'LaTeX Error: Missing \begin{document}.' when attempting to knit.
+    (https://github.com/Bioconductor/BiocStyle/issues/89)
+
+
+CHANGES IN VERSION 2.22.0
+------------------------
+
+USER-VISIBLE CHANGES
+
+    o Added section to HTML vignette regarding accessibility considerations
+    when creating plots and figures.
+
+BUG FIXES AND IMPROVEMENTS TO HTML STYLE
+
+    o Improved navigation for screen readers by adding role='link' and 
+    tabindex='0' to elements in the table of contents.  TOC navigation can also
+    be followed by pressing "Enter" when selected in addition to clicking with 
+    the cursor.
+    o Addressed further styling issues for code blocks, introduced by changes
+    in rmarkdown.  This time re-introducing padding around <pre> tags.
+
+CHANGES IN VERSION 2.20.0
+------------------------
+
+    o Addressed styling issues for output code blocks, introduced by changes
+    in rmarkdown version 2.7.0 
+    (https://github.com/Bioconductor/BiocStyle/issues/86)
+
+CHANGES IN VERSION 2.18.0
+------------------------
+
+BUG FIXES
+
+    o Fix issue where images created with the `fig.small=TRUE` chunk argument
+    were not displayed in HTML output 
+    (https://github.com/Bioconductor/BiocStyle/issues/83).
+
+CHANGES IN VERSION 2.8.0
+------------------------
+
+SIGNIFICANT USER-VISIBLE CHANGES
+
+    o Add 'relative_path' argument to 'pdf_document'
+    o Add argument 'titlecaps' to 'html_document'
+    o Defunct deprecated functions
+
+BUG FIXES
+
+    o Fix a bug in generating navigation links which resulted in an empty
+      document when there were no subsections to merge
+
+CHANGES IN VERSION 2.6.0
+------------------------
+
+SIGNIFICANT USER-VISIBLE CHANGES
+
+    o Rename 'latex2', 'pdf_document2' and 'html_document2' to 'latex', 'pdf_document' and 'html_document', respectively
+    o Rename argument to 'pdf_document' from 'use.unsrturl' to 'use_unsrturl' for consistency with rmarkdown naming scheme
+    o Split figure/table captions on ". " rather than "." in order to minimize chances of hitting decimal point in numbers, etc.
+
+BUG FIXES AND IMPROVEMENTS TO PDF STYLE
+
+    o Make knitr option 'fig.pos' functional in 'pdf_document'
+    o Improve formatting of TOC chapter entries (https://github.com/Bioconductor/BiocStyle/issues/35)
+    o Adjust width of non-floating figures according to the 'fig.wide'/'fig.small' setting (reported by Aaron Lun)
+    o Robustify \texttt, e.g.  by enabling backticks and fixing the substitution of control spaces
+    o Update LaTeX code highlighting macros for pandoc output (reported by Vince Carey)
+    o Silence spurious warning in 'latex()' emitted when the source file is missing a final EOL
+    o Fix broken code in knitr hook adjusting page width
+    o Include package version field in R Markdown documents even if they are missing an abstract (https://github.com/Bioconductor/BiocStyle/issues/29)
+    o Correct way of enclosing non-floating figures in LaTeX 'adjustwidth' environment (https://github.com/Bioconductor/BiocStyle/issues/28)
+
+BUG FIXES AND IMPROVEMENTS TO HTML STYLE
+
+    o Correct displaying of superscript text
+    o Allow modifying table layout in 'knitr::kable' (https://github.com/Bioconductor/BiocStyle/issues/30)
+    o Correct padding of nested lists, and indentation of document date and multi-line headings
+    o Fix a bug in the function matching author affiliations (https://support.bioconductor.org/p/98155/)
+    o Proper horizontal alignment of ggplotly graphics (https://support.bioconductor.org/p/97609/)
+    o Fix compatibility with 'runtime: shiny' document option
+
+CHANGES IN VERSION 2.4.0
+------------------------
+
+NEW FEATURES
+
+    o Vignette "Authoring R Markdown vignettes"
+    o R Markdown templates for 'pdf_document2' and 'html_document2'
+    o Standard way of specifying author affiliations
+    o Support for short title in R Markdown PDF output
+    o Argument 'relative.path' to 'latex2()' (https://support.bioconductor.org/p/90352/)
+   
+SIGNIFICANT USER-VISIBLE CHANGES
+
+    o Increase column width in order to accommodate 80 characters wide code chunks
+    o Separate caption title from description with newline
+    o Use canonical URL to link to CRAN packages (https://github.com/Bioconductor/BiocStyle/issues/24)
+    o Consistently number equations on right hand side across different output formats
+    o Numerous CSS tweaks
+
+BUG FIXES AND IMPROVEMENTS
+
+    o Support for PDFs typeset with 9pt and 8pt font size
+    o Proper formatting of 'longtable' captions
+    o Fix to retain spaces in '\texttt'
+    o Replace carets "\^{}" by "\textasciicircum" to fix incompatibility with LaTeX 'soul' package used for inline code highlighting
+    o Patch to avoid overfull pages containing a float followed by a longtable
+
+CHANGES IN VERSION 2.2.0
+------------------------
+
+NEW FEATURES
+
+    o New Bioconductor HTML Style. See package vignettes for details.
+    
+BUG FIXES AND IMPROVEMENTS to Bioconductor LaTeX Style 2
+
+    o Use `\path` for file names to allow long line breaks
+    o Load 'nowidow' LaTeX package to prevent widows and orphans
+    o Patch bug in 'titlesec' 2.10.1 (http://tex.stackexchange.com/q/299969/102422)
+    o Pass option `multiple` to 'footmisc' for better handling of consecutive footnotes
+    o Load 'marginfix' LaTeX package to prevent margin notes from overflowing the bottom margin
+    o Fix the issue with color spilling out on margin notes (https://github.com/Bioconductor/BiocStyle/issues/5)
+    o Use `fig.asp` to override figure height (https://github.com/Bioconductor/BiocStyle/issues/4)
+    o Fix compatibility with the 'float' package, in particular the `[H]` placement specifier
+    o Load 'marginfix' LaTeX package to prevent margin notes from overflowing the bottom margin
+    o Enclose wide floats in `\blockmargin` and `\unblockmargin` to prevent footnotes from entering them
+    o Move the footnote mark inside margin notes
+    o Add vertical skip after margin phantoms of wide floats for better alignment of margin notes with paragraph text
+    o Fix concatenation of `includes` reported in https://github.com/Bioconductor/BiocStyle/issues/8
+    o Stratify parnote mark definition depending on package version (https://github.com/Bioconductor/BiocStyle/issues/7)
+    o Capitalize default opening words in `\comment`, `\warning` and `\fixme`, and mention the optional argument in the vignette
+    
+CHANGES IN VERSION 2.0.0
+------------------------
+
+    o New Bioconductor LaTeX Style. See package vignettes for details.
+
+CHANGES IN VERSION 1.8.0
+------------------------
+  
+    o R Markdown templates for Bioconductor HTML and PDF documents
+    o Suggest 'rmarkdown' as the default engine for .Rmd documents
+    o Simplified use with 'rmarkdown' - no need to include a separate code chunk calling 'BiocStyle::markdown' anymore
+    o Functions facilitating the inclusion of document compilation date and package version in the .Rmd document header
+
+CHANGES IN VERSION 1.4.0
+------------------------
+
+USER VISIBLE CHANGES
+
+    o Support for markdown documents
+
+    o Add \Githubpkg markup command
+
+CHANGES IN VERSION 1.2.0
+------------------------
+
+USER VISIBLE CHANGES
+
+    o Remove dependency on 'helvet' LaTeX package to allow for the same font
+      both in Sweave and knitr
+
+    o Improve package vignette by adding paragraphs about building vignettes
+      and using bibliography
+
+    o knitr chunk_opts error=FALSE by default, so failures during vignette
+      processing are signaled to R CMD build and R CMD check
+
+    o Name-mangle \comment mark-up to avoid conflicts with other LaTeX styles
+
+    o Introduce \bioctitle to allow for full and short (header) titles
+
+    o Add BiocStyle::latex option 'use.unsrturl=TRUE' to use the 'unsrturl'
+      bibliography style by default
+
+BUG FIXES
+
+    o Avoid use of 'titling' LaTeX package to circumvent the conflict w/ 
+      \footnote in \author
+
+CHANGES IN VERSION 1.0.0
+------------------------
+
+USER VISIBLE CHANGES
+
+    o Rename \Rpkg{} as \CRANpkg{} to reflect functionality
+
+BUG FIXES
+
+    o Avoid option conflict with \usepackage{colors}

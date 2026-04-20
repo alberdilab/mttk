@@ -1,0 +1,50 @@
+Package: MTTK
+Title: Metatranscriptomics toolkit for nested gene, genome, and community analysis
+Version: 0.1.0
+Authors@R:
+    person(
+        given = "Antton",
+        family = "Alberdi",
+        email = "antton.alberdi@sund.ku.dk",
+        role = c("aut", "cre")
+    )
+Author: Antton Alberdi [aut, cre]
+Maintainer: Antton Alberdi <antton.alberdi@sund.ku.dk>
+Description: MTTK helps users organize genome-resolved
+    metatranscriptomic studies as linked gene, genome, and community data. It
+    stores count and abundance assays together with sample information, genome
+    annotations, and mappings across biological and functional hierarchies in
+    Bioconductor-friendly containers. This makes it easier to summarize
+    features, compare genomes or clades, and prepare data for downstream
+    differential expression, association analysis, aggregation, and
+    visualization workflows.
+Depends:
+    R (>= 4.3.0)
+Imports:
+    methods,
+    S4Vectors,
+    SummarizedExperiment,
+    TreeSummarizedExperiment
+Suggests:
+    BiocStyle,
+    knitr,
+    rmarkdown,
+    testthat (>= 3.0.0)
+VignetteBuilder: knitr
+License: Artistic-2.0
+Encoding: UTF-8
+LazyData: false
+Collate:
+    'AllGenerics.R'
+    'MTTK-package.R'
+    'MTTKExperiment-utils.R'
+    'MTTKExperiment-class.R'
+    'MTTKExperiment.R'
+    'MTTKExperiment-accessors.R'
+    'MTTKExperiment-analysis.R'
+    'MTTKExample.R'
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
+Config/testthat/edition: 3
+biocViews: Software, Infrastructure, Sequencing, RNASeq, GeneExpression,
+    DifferentialExpression, Metagenomics

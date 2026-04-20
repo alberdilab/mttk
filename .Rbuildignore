@@ -1,0 +1,6 @@
+^data-raw$
+^MTTK_.*\.tar\.gz$
+^\.git$
+^\.\.Rcheck$
+^MTTK\.Rcheck$
+^\.rlib$

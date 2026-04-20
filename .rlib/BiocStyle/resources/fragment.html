@@ -1,0 +1,43 @@
+$for(header-includes)$
+$header-includes$
+$endfor$
+
+$for(include-before)$
+$include-before$
+$endfor$
+
+$if(title)$
+<h1 class="title toc-ignore">$title$</h1>
+$endif$
+
+<!-- AUTH AFFIL -->
+
+$if(abstract)$
+<h1>Abstract</h1>
+$abstract$
+$endif$
+
+$if(toc)$
+<div id="$idprefix$TOC">
+<h1>Contents</h1>
+$toc$
+</div>
+$endif$
+
+$body$
+
+$for(include-after)$
+$include-after$
+$endfor$
+
+$if(mathjax-url)$
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+  (function () {
+    var script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src  = "$mathjax-url$";
+    document.getElementsByTagName("head")[0].appendChild(script);
+  })();
+</script>
+$endif$

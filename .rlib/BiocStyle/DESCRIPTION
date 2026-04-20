@@ -1,0 +1,42 @@
+Package: BiocStyle
+Title: Standard styles for vignettes and other Bioconductor documents
+Description: Provides standard formatting styles for Bioconductor PDF
+    and HTML documents. Package vignettes illustrate use and
+    functionality.
+Version: 2.30.0
+Authors@R: c(
+        person("Andrzej", "Oleś", role = "aut",
+            comment = c(ORCID = "0000-0003-0285-2787")
+        ), 
+        person("Mike", "Smith", role = "ctb",
+            comment = c(ORCID = "0000-0002-7800-3848")
+        ),
+        person("Martin", "Morgan", role = "ctb"),
+        person("Wolfgang", "Huber", role = "ctb"),
+        person("Bioconductor Package", role = "cre",
+            email = "maintainer@bioconductor.org")
+        )
+Imports: bookdown, knitr (>= 1.30), rmarkdown (>= 1.2), stats, utils,
+        yaml, BiocManager
+Suggests: BiocGenerics, RUnit, htmltools
+biocViews: Software
+License: Artistic-2.0
+VignetteBuilder: knitr
+Encoding: UTF-8
+URL: https://github.com/Bioconductor/BiocStyle
+BugReports: https://github.com/Bioconductor/BiocStyle/issues
+RoxygenNote: 6.1.0
+git_url: https://git.bioconductor.org/packages/BiocStyle
+git_branch: RELEASE_3_18
+git_last_commit: 48deba5
+git_last_commit_date: 2023-10-24
+Date/Publication: 2023-10-26
+NeedsCompilation: no
+Packaged: 2023-10-26 23:26:22 UTC; biocbuild
+Author: Andrzej Oleś [aut] (<https://orcid.org/0000-0003-0285-2787>),
+  Mike Smith [ctb] (<https://orcid.org/0000-0002-7800-3848>),
+  Martin Morgan [ctb],
+  Wolfgang Huber [ctb],
+  Bioconductor Package [cre]
+Maintainer: Bioconductor Package <maintainer@bioconductor.org>
+Built: R 4.3.1; ; 2023-10-28 17:22:26 UTC; unix
