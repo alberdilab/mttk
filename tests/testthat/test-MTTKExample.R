@@ -19,7 +19,13 @@ test_that("the packaged example object is available and reproducible", {
     )
     expect_identical(
         names(links(MTTKExample)),
-        c("gene_to_genome", "gene_to_ko", "ko_to_module", "module_to_pathway")
+        c(
+            "gene_to_genome",
+            "gene_to_ko",
+            "ko_to_module",
+            "ko_to_pathway",
+            "module_to_pathway"
+        )
     )
     expect_identical(rownames(genomeData(MTTKExample)), c("genome_1", "genome_2", "genome_3"))
     expect_identical(dim(dnaGenomeCounts(MTTKExample)), c(3L, 4L))

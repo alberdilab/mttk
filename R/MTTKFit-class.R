@@ -11,7 +11,7 @@
 #'
 #' @section Canonical identifiers:
 #' `rownames(x)` are the canonical identifiers of the modeled features. If a
-#' `ko_id` column is present, it must match `rownames(x)` exactly.
+#' `ko_id` or `gene_id` column is present, it must match `rownames(x)` exactly.
 #'
 #' @section Stored metadata:
 #' `metadata(x)$mttk_fit` is reserved for MTTK-specific fit metadata and may
@@ -48,6 +48,14 @@ NULL
         problems <- c(
             problems,
             "'ko_id' must match 'rownames(x)' exactly when present."
+        )
+    }
+
+    if ("gene_id" %in% names(object) &&
+        !identical(as.character(object$gene_id), as.character(feature_ids))) {
+        problems <- c(
+            problems,
+            "'gene_id' must match 'rownames(x)' exactly when present."
         )
     }
 

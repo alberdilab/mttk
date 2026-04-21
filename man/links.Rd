@@ -39,6 +39,9 @@ identifier columns. They should therefore use explicit identifier names such
 as \code{gene_id}, \code{ko_id}, \code{module_id}, or \code{pathway_id}. A non-core link table
 is valid only when its source identifiers match canonical IDs already stored
 in the object or target identifiers introduced by another link table.
+Direct many-to-many mappings such as \code{ko_to_module} and \code{ko_to_pathway} are
+therefore supported, alongside chained mappings such as
+\code{module_to_pathway}.
 
 When an \code{MTTKExperiment} is subset by rows, link tables whose source IDs are
 downstream of the retained genes are pruned so the remaining mappings stay

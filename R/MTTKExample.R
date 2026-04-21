@@ -79,12 +79,40 @@
             ko_id = row_data$ko_id
         ),
         ko_to_module = S4Vectors::DataFrame(
-            ko_id = c("K03043", "K02111", "K00368"),
-            module_id = c("M001", "M002", "M003")
+            ko_id = c(
+                "K03043", "K03043",
+                "K02111", "K02111",
+                "K00368", "K00368"
+            ),
+            module_id = c(
+                "M00001", "M00002",
+                "M00009", "M00115",
+                "M00010", "M00011"
+            )
+        ),
+        ko_to_pathway = S4Vectors::DataFrame(
+            ko_id = c(
+                "K03043", "K03043",
+                "K02111", "K02111",
+                "K00368", "K00368"
+            ),
+            pathway_id = c(
+                "map00010", "map00020",
+                "map00020", "map00190",
+                "map00910", "map00680"
+            )
         ),
         module_to_pathway = S4Vectors::DataFrame(
-            module_id = c("M001", "M002", "M003"),
-            pathway_id = c("map00970", "map00910", "map00920")
+            module_id = c(
+                "M00001", "M00002",
+                "M00009", "M00115",
+                "M00010", "M00011"
+            ),
+            pathway_id = c(
+                "map00010", "map00020",
+                "map00020", "map00190",
+                "map00910", "map00680"
+            )
         )
     )
 
@@ -133,7 +161,8 @@
 #' - a gene-level `rna_gene_counts` assay,
 #' - a genome-level `dna_genome_counts` assay stored in `genomeExperiment(x)`,
 #' - feature, sample, and genome metadata,
-#' - explicit biological and functional mapping tables.
+#' - explicit biological and functional mapping tables, including direct
+#'   many-to-many `ko_to_module` and `ko_to_pathway` links.
 #'
 #' @return A valid `MTTKExperiment`.
 #'

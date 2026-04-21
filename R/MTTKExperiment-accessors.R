@@ -196,6 +196,9 @@ methods::setReplaceMethod("genomeData", "MTTKExperiment", function(x, value) {
 #' as `gene_id`, `ko_id`, `module_id`, or `pathway_id`. A non-core link table
 #' is valid only when its source identifiers match canonical IDs already stored
 #' in the object or target identifiers introduced by another link table.
+#' Direct many-to-many mappings such as `ko_to_module` and `ko_to_pathway` are
+#' therefore supported, alongside chained mappings such as
+#' `module_to_pathway`.
 #'
 #' When an `MTTKExperiment` is subset by rows, link tables whose source IDs are
 #' downstream of the retained genes are pruned so the remaining mappings stay

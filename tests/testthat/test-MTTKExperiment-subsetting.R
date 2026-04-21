@@ -16,8 +16,18 @@ test_that("row subsetting prunes genome-level rows and dependent links", {
         )
     )
     expect_identical(links(y)$gene_to_ko$gene_id, c("gene_1", "gene_2"))
-    expect_identical(links(y)$ko_to_module$ko_id, c("K03043", "K02111"))
-    expect_identical(links(y)$module_to_pathway$module_id, c("M001", "M002"))
+    expect_identical(
+        links(y)$ko_to_module$ko_id,
+        c("K03043", "K03043", "K02111", "K02111")
+    )
+    expect_identical(
+        links(y)$ko_to_pathway$ko_id,
+        c("K03043", "K03043", "K02111", "K02111")
+    )
+    expect_identical(
+        links(y)$module_to_pathway$module_id,
+        c("M00001", "M00002", "M00009", "M00115")
+    )
     expect_true(methods::validObject(y))
 })
 
@@ -45,6 +55,7 @@ test_that("column subsetting narrows both gene and genome assays", {
     expect_identical(dim(dnaGenomeCounts(y)), c(3L, 2L))
     expect_identical(rownames(genomeData(y)), c("genome_1", "genome_2", "genome_3"))
     expect_identical(names(links(y)), names(links(x)))
+    expect_identical(links(y)$ko_to_pathway$ko_id, links(x)$ko_to_pathway$ko_id)
     expect_identical(links(y)$module_to_pathway$module_id, links(x)$module_to_pathway$module_id)
     expect_true(methods::validObject(y))
 })
@@ -59,6 +70,7 @@ test_that("row subsetting to zero genes yields a valid empty nested object", {
     expect_identical(dim(dnaGenomeCounts(y)), c(0L, 4L))
     expect_identical(nrow(links(y)$gene_to_ko), 0L)
     expect_identical(nrow(links(y)$ko_to_module), 0L)
+    expect_identical(nrow(links(y)$ko_to_pathway), 0L)
     expect_identical(nrow(links(y)$module_to_pathway), 0L)
     expect_true(methods::validObject(y))
 })

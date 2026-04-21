@@ -65,13 +65,15 @@ MTTKFit <- function(results = NULL, info = list(), models = list()) {
 .fit_feature_ids <- function(x) {
     if ("ko_id" %in% names(x)) {
         ids <- as.character(x$ko_id)
+    } else if ("gene_id" %in% names(x)) {
+        ids <- as.character(x$gene_id)
     } else {
         ids <- rownames(x)
     }
 
     if (is.null(ids) || anyNA(ids) || any(ids == "")) {
         stop(
-            "The fit must contain canonical feature identifiers in 'ko_id' or row names.",
+            "The fit must contain canonical feature identifiers in 'ko_id', 'gene_id', or row names.",
             call. = FALSE
         )
     }
@@ -225,6 +227,285 @@ MTTKFit <- function(results = NULL, info = list(), models = list()) {
     out <- do.call(S4Vectors::DataFrame, c(annotation_cols, list(row.names = feature_ids)))
     rownames(out) <- feature_ids
     out
+}
+
+.normalize_annotation_paths <- function(path) {
+    if (is.character(path)) {
+        if (length(path) == 0L || anyNA(path) || any(path == "")) {
+            stop("'path' must contain one or more named link tables.", call. = FALSE)
+        }
+        return(list(path))
+    }
+
+    if (!is.list(path) || length(path) == 0L) {
+        stop(
+            "'path' must be a character vector or a list of character vectors naming link tables.",
+            call. = FALSE
+        )
+    }
+
+    out <- lapply(path, function(one_path) {
+        if (!is.character(one_path) || length(one_path) == 0L || anyNA(one_path) || any(one_path == "")) {
+            stop(
+                "Each element of 'path' must be a non-empty character vector naming link tables.",
+                call. = FALSE
+            )
+        }
+
+        one_path
+    })
+
+    if (is.null(names(out))) {
+        names(out) <- paste0("path_", seq_along(out))
+    }
+
+    out
+}
+
+.normalize_module_table <- function(module_table) {
+    if (is.null(module_table)) {
+        return(NULL)
+    }
+
+    if (is.character(module_table) && length(module_table) == 1L && !is.na(module_table)) {
+        return(readKEGGModuleTable(module_table))
+    }
+
+    if (is.data.frame(module_table) && !methods::is(module_table, "DataFrame")) {
+        module_table <- S4Vectors::DataFrame(module_table, check.names = FALSE)
+    }
+
+    if (!methods::is(module_table, "DataFrame")) {
+        stop(
+            "'moduleTable' must be NULL, a file path, an S4Vectors::DataFrame, or a data.frame.",
+            call. = FALSE
+        )
+    }
+
+    normalized <- module_table
+    current_names <- names(normalized)
+
+    rename_map <- c(
+        module = "module_id",
+        definition = "module_definition",
+        name = "module_name",
+        class = "module_class"
+    )
+
+    for (from in names(rename_map)) {
+        to <- rename_map[[from]]
+        if (from %in% current_names && !(to %in% current_names)) {
+            names(normalized)[names(normalized) == from] <- to
+        }
+    }
+
+    if (!("module_id" %in% names(normalized))) {
+        stop("'moduleTable' must contain a 'module_id' column.", call. = FALSE)
+    }
+
+    keep_cols <- c(
+        "module_id",
+        intersect(
+            c("module_name", "module_class", "module_definition"),
+            names(normalized)
+        )
+    )
+    normalized <- normalized[, keep_cols, drop = FALSE]
+    normalized$module_id <- as.character(normalized$module_id)
+    normalized <- normalized[!is.na(normalized$module_id) & normalized$module_id != "", , drop = FALSE]
+
+    if (nrow(normalized) == 0L) {
+        stop("'moduleTable' does not contain any non-empty module identifiers.", call. = FALSE)
+    }
+
+    keep_rows <- !duplicated(normalized$module_id)
+    normalized <- normalized[keep_rows, , drop = FALSE]
+    rownames(normalized) <- normalized$module_id
+    normalized
+}
+
+.normalize_kegg_module_ids <- function(module_ids) {
+    if (is.null(module_ids)) {
+        return(NULL)
+    }
+
+    if (!is.character(module_ids)) {
+        stop(
+            "'moduleIds' must be NULL or a character vector of KEGG module identifiers.",
+            call. = FALSE
+        )
+    }
+
+    module_ids <- trimws(as.character(module_ids))
+    module_ids <- module_ids[!is.na(module_ids) & module_ids != ""]
+
+    if (length(module_ids) == 0L) {
+        stop("'moduleIds' does not contain any non-empty module identifiers.", call. = FALSE)
+    }
+
+    module_ids <- unlist(strsplit(module_ids, ";", fixed = TRUE), use.names = FALSE)
+    module_ids <- trimws(module_ids)
+    module_ids <- module_ids[module_ids != ""]
+    module_ids <- sub("^md:", "", module_ids)
+    unique(module_ids)
+}
+
+.collapse_kegg_text <- function(values, collapse = "; ") {
+    values <- trimws(as.character(values))
+    values <- unique(values[!is.na(values) & values != ""])
+
+    if (length(values) == 0L) {
+        return(NA_character_)
+    }
+
+    paste(values, collapse = collapse)
+}
+
+.kegg_entry_id <- function(entry) {
+    entry_value <- entry$ENTRY
+    if (length(entry_value) == 0L) {
+        return(NA_character_)
+    }
+
+    entry_value <- trimws(as.character(entry_value)[1L])
+    entry_value <- sub("\\s.*$", "", entry_value)
+    sub("^md:", "", entry_value)
+}
+
+.fetch_kegg_module_listing <- function() {
+    tryCatch(
+        KEGGREST::keggList("module"),
+        error = function(e) {
+            stop(
+                "KEGGREST failed to retrieve the KEGG module list: ",
+                conditionMessage(e),
+                call. = FALSE
+            )
+        }
+    )
+}
+
+.fetch_kegg_module_entries <- function(module_ids, batch_size, sleep) {
+    batches <- split(
+        paste0("md:", module_ids),
+        ceiling(seq_along(module_ids) / batch_size)
+    )
+
+    entries <- list()
+
+    for (i in seq_along(batches)) {
+        batch_entries <- tryCatch(
+            KEGGREST::keggGet(batches[[i]]),
+            error = function(e) {
+                stop(
+                    "KEGGREST failed to retrieve KEGG module details: ",
+                    conditionMessage(e),
+                    call. = FALSE
+                )
+            }
+        )
+
+        entries <- c(entries, batch_entries)
+
+        if (sleep > 0 && i < length(batches)) {
+            Sys.sleep(sleep)
+        }
+    }
+
+    entries
+}
+
+.collapse_unique_strings <- function(values, collapse) {
+    values <- unique(as.character(values))
+    values <- values[!is.na(values) & values != ""]
+
+    if (length(values) == 0L) {
+        return(NA_character_)
+    }
+
+    paste(values, collapse = collapse)
+}
+
+.split_collapsed_ids <- function(value, collapse) {
+    if (is.na(value) || value == "") {
+        return(character())
+    }
+
+    values <- strsplit(as.character(value), collapse, fixed = TRUE)[[1L]]
+    values <- trimws(values)
+    values[values != ""]
+}
+
+.expand_module_annotations <- function(module_ids, module_table, collapse) {
+    module_table <- .normalize_module_table(module_table)
+
+    if (is.null(module_table)) {
+        return(S4Vectors::DataFrame(row.names = names(module_ids)))
+    }
+
+    extra_cols <- setdiff(names(module_table), "module_id")
+    if (length(extra_cols) == 0L) {
+        return(S4Vectors::DataFrame(row.names = names(module_ids)))
+    }
+
+    lookup <- as.data.frame(module_table)
+    lookup_idx <- stats::setNames(seq_len(nrow(lookup)), lookup$module_id)
+
+    annotation_cols <- lapply(extra_cols, function(col_name) {
+        values <- vapply(
+            module_ids,
+            function(one_entry) {
+                ids <- .split_collapsed_ids(one_entry, collapse)
+                idx <- unname(lookup_idx[ids])
+                idx <- idx[!is.na(idx)]
+
+                if (length(idx) == 0L) {
+                    return(NA_character_)
+                }
+
+                .collapse_unique_strings(lookup[[col_name]][idx], collapse = collapse)
+            },
+            character(1)
+        )
+
+        values
+    })
+    names(annotation_cols) <- extra_cols
+
+    out <- do.call(
+        S4Vectors::DataFrame,
+        c(annotation_cols, list(row.names = names(module_ids)))
+    )
+    rownames(out) <- names(module_ids)
+    out
+}
+
+.join_fit_annotations_multi <- function(feature_ids, link_list, path, collapse) {
+    paths <- .normalize_annotation_paths(path)
+    annotations <- S4Vectors::DataFrame(row.names = feature_ids)
+
+    for (one_path in paths) {
+        joined <- .join_fit_annotations(
+            feature_ids = feature_ids,
+            link_list = link_list,
+            path = one_path,
+            collapse = collapse
+        )
+
+        duplicated_cols <- intersect(names(annotations), names(joined))
+        if (length(duplicated_cols) > 0L) {
+            stop(
+                "Annotation paths produce duplicate output column(s): ",
+                paste(duplicated_cols, collapse = ", "),
+                ".",
+                call. = FALSE
+            )
+        }
+
+        annotations <- cbind(annotations, joined)
+    }
+
+    annotations
 }
 
 #' Fit Metadata
@@ -488,15 +769,22 @@ significantResults <- function(
 #' represent KO identifiers, such as the first KO-level mixed-model workflow in
 #' MTTK.
 #'
-#' By default the function follows `ko_to_module -> module_to_pathway` and adds
-#' `module_id` and `pathway_id` columns. When a KO maps to multiple downstream
-#' identifiers, the unique values are collapsed into a single string.
+#' By default the function follows two direct KO-centered mappings,
+#' `ko_to_module` and `ko_to_pathway`, and adds `module_id` and `pathway_id`
+#' columns. When a KO maps to multiple downstream identifiers, the unique
+#' values are collapsed into a single string.
 #'
 #' @param x An `MTTKFit` whose rows represent KO identifiers.
 #' @param object An `MTTKExperiment` supplying the annotation link tables.
-#' @param path Character vector naming one or more annotation link tables to
-#'   traverse.
+#' @param path A character vector naming one sequential annotation path, or a
+#'   list of character vectors naming multiple paths to traverse in parallel.
+#'   The default adds direct `ko_to_module` and `ko_to_pathway` annotations.
 #' @param collapse String used to combine multiple target identifiers per KO.
+#' @param moduleTable Optional KEGG module annotation table used to append
+#'   module description columns when `module_id` annotations are present. This
+#'   can be supplied as a file path, `data.frame`, or `S4Vectors::DataFrame`.
+#'   [fetchKEGGModuleTable()] can be used to retrieve this table directly from
+#'   KEGG through `KEGGREST`.
 #'
 #' @return An `MTTKFit` with appended annotation columns.
 #'
@@ -515,8 +803,12 @@ significantResults <- function(
 annotateKOFit <- function(
     x,
     object,
-    path = c("ko_to_module", "module_to_pathway"),
-    collapse = ";"
+    path = list(
+        module = "ko_to_module",
+        pathway = "ko_to_pathway"
+    ),
+    collapse = ";",
+    moduleTable = NULL
 ) {
     if (!methods::is(x, "MTTKFit")) {
         stop("'x' must be an MTTKFit.", call. = FALSE)
@@ -527,12 +819,32 @@ annotateKOFit <- function(
     }
 
     feature_ids <- .fit_feature_ids(x)
-    annotations <- .join_fit_annotations(
+    annotations <- .join_fit_annotations_multi(
         feature_ids = feature_ids,
         link_list = links(object),
         path = path,
         collapse = collapse
     )
+
+    if ("module_id" %in% names(annotations) && !is.null(moduleTable)) {
+        module_annotations <- .expand_module_annotations(
+            module_ids = stats::setNames(as.character(annotations$module_id), rownames(annotations)),
+            module_table = moduleTable,
+            collapse = collapse
+        )
+
+        duplicated_cols <- intersect(names(annotations), names(module_annotations))
+        if (length(duplicated_cols) > 0L) {
+            stop(
+                "Module annotations produce duplicate output column(s): ",
+                paste(duplicated_cols, collapse = ", "),
+                ".",
+                call. = FALSE
+            )
+        }
+
+        annotations <- cbind(annotations, module_annotations[rownames(annotations), , drop = FALSE])
+    }
 
     conflicting <- intersect(colnames(annotations), colnames(x))
     if (length(conflicting) > 0L) {
@@ -554,6 +866,173 @@ annotateKOFit <- function(
         info = fitInfo(x),
         models = modelObjects(x)
     )
+}
+
+#' Fetch KEGG Module Annotations with KEGGREST
+#'
+#' `fetchKEGGModuleTable()` retrieves KEGG module metadata directly from the
+#' KEGG MODULE database through `KEGGREST` and returns it in the standardized
+#' format used by MTTK.
+#'
+#' The resulting table contains `module_id`, `module_name`, `module_class`, and
+#' `module_definition` columns and can be supplied directly to
+#' [annotateKOFit()] through its `moduleTable` argument.
+#'
+#' By default the function requests the full KEGG module catalog. To reduce
+#' runtime and network traffic, pass a subset of `moduleIds` when only a small
+#' number of modules are needed.
+#'
+#' Access to the KEGG REST API is provided by `KEGGREST` and subject to KEGG's
+#' academic-use terms.
+#'
+#' @param moduleIds Optional character vector of KEGG module identifiers. Bare
+#'   IDs such as `M00001` and prefixed IDs such as `md:M00001` are both
+#'   accepted. Values collapsed with `";"` are also split automatically.
+#' @param batchSize Number of module entries to request per `keggGet()` call.
+#'   KEGG limits `keggGet()` requests to at most 10 entries.
+#' @param sleep Optional number of seconds to wait between successive KEGG REST
+#'   requests.
+#'
+#' @return An `S4Vectors::DataFrame`.
+#'
+#' @examples
+#' \dontrun{
+#' module_table <- fetchKEGGModuleTable(c("M00001", "M00002"))
+#' }
+#'
+#' @export
+fetchKEGGModuleTable <- function(moduleIds = NULL, batchSize = 10L, sleep = 0) {
+    module_ids <- .normalize_kegg_module_ids(moduleIds)
+
+    if (!is.numeric(batchSize) || length(batchSize) != 1L || is.na(batchSize)) {
+        stop("'batchSize' must be a single number between 1 and 10.", call. = FALSE)
+    }
+
+    batchSize <- as.integer(batchSize)
+    if (batchSize < 1L || batchSize > 10L) {
+        stop("'batchSize' must be between 1 and 10.", call. = FALSE)
+    }
+
+    if (!is.numeric(sleep) || length(sleep) != 1L || is.na(sleep) || sleep < 0) {
+        stop("'sleep' must be a single non-negative number.", call. = FALSE)
+    }
+
+    if (!requireNamespace("KEGGREST", quietly = TRUE)) {
+        stop(
+            "Package 'KEGGREST' is required for fetchKEGGModuleTable(). ",
+            "Install it with BiocManager::install(\"KEGGREST\").",
+            call. = FALSE
+        )
+    }
+
+    module_listing <- .fetch_kegg_module_listing()
+    listing_ids <- sub("^md:", "", names(module_listing))
+    listing_names <- unname(as.character(module_listing))
+
+    listing <- S4Vectors::DataFrame(
+        module_id = listing_ids,
+        module_name = listing_names,
+        row.names = listing_ids
+    )
+    listing <- listing[!duplicated(listing$module_id), , drop = FALSE]
+
+    if (is.null(module_ids)) {
+        module_ids <- as.character(listing$module_id)
+    } else {
+        missing_ids <- setdiff(module_ids, as.character(listing$module_id))
+        if (length(missing_ids) > 0L) {
+            warning(
+                "The following KEGG module IDs were not found in the KEGG module list and will be skipped: ",
+                paste(missing_ids, collapse = ", "),
+                call. = FALSE
+            )
+        }
+
+        module_ids <- intersect(module_ids, as.character(listing$module_id))
+        if (length(module_ids) == 0L) {
+            stop("None of the requested 'moduleIds' were found in the KEGG module list.", call. = FALSE)
+        }
+    }
+
+    listing <- listing[module_ids, , drop = FALSE]
+    module_entries <- .fetch_kegg_module_entries(module_ids, batchSize, sleep)
+
+    result <- S4Vectors::DataFrame(
+        module_id = as.character(listing$module_id),
+        module_name = as.character(listing$module_name),
+        module_class = rep(NA_character_, nrow(listing)),
+        module_definition = rep(NA_character_, nrow(listing)),
+        row.names = as.character(listing$module_id)
+    )
+
+    for (entry in module_entries) {
+        entry_id <- .kegg_entry_id(entry)
+        if (is.na(entry_id) || !(entry_id %in% rownames(result))) {
+            next
+        }
+
+        if (length(entry$NAME) > 0L) {
+            result[entry_id, "module_name"] <- .collapse_kegg_text(entry$NAME)
+        }
+
+        if (length(entry$CLASS) > 0L) {
+            result[entry_id, "module_class"] <- .collapse_kegg_text(entry$CLASS)
+        }
+
+        if (length(entry$DEFINITION) > 0L) {
+            result[entry_id, "module_definition"] <- .collapse_kegg_text(entry$DEFINITION)
+        }
+    }
+
+    .normalize_module_table(result)
+}
+
+#' Read a KEGG Module Annotation Table
+#'
+#' `readKEGGModuleTable()` imports a tab-separated KEGG module table and
+#' standardizes the main columns used by MTTK. The returned table uses
+#' `module_id`, `module_name`, `module_class`, and `module_definition` column
+#' names when those fields are available.
+#'
+#' This is intended for tables exported from KEGG-derived resources, where the
+#' original columns are named `module`,
+#' `name`, `class`, and `definition`.
+#'
+#' @param file Path to a tab-separated module table.
+#'
+#' @return An `S4Vectors::DataFrame`.
+#'
+#' @examples
+#' tf <- tempfile(fileext = ".tsv")
+#' writeLines(
+#'     c(
+#'         "module\tdefinition\tname\tclass",
+#'         "M00001\tK00001 K00002\tExample module\tPathway modules; Example"
+#'     ),
+#'     tf
+#' )
+#' readKEGGModuleTable(tf)
+#'
+#' @export
+readKEGGModuleTable <- function(file) {
+    if (!is.character(file) || length(file) != 1L || is.na(file) || file == "") {
+        stop("'file' must be a single non-empty file path.", call. = FALSE)
+    }
+
+    if (!file.exists(file)) {
+        stop("The module table file does not exist: ", file, ".", call. = FALSE)
+    }
+
+    module_table <- utils::read.delim(
+        file,
+        header = TRUE,
+        sep = "\t",
+        quote = "",
+        stringsAsFactors = FALSE,
+        check.names = FALSE
+    )
+
+    .normalize_module_table(module_table)
 }
 
 methods::setMethod("show", "MTTKFit", function(object) {

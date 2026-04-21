@@ -20,7 +20,8 @@ The returned object contains:
 \item a gene-level \code{rna_gene_counts} assay,
 \item a genome-level \code{dna_genome_counts} assay stored in \code{genomeExperiment(x)},
 \item feature, sample, and genome metadata,
-\item explicit biological and functional mapping tables.
+\item explicit biological and functional mapping tables, including direct
+many-to-many \code{ko_to_module} and \code{ko_to_pathway} links.
 }
 }
 \examples{

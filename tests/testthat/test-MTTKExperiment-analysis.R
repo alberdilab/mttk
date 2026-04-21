@@ -36,7 +36,7 @@ test_that("genome aggregation uses rowData genome ids as the authoritative nesti
 
     expect_identical(
         names(links(x)),
-        c("gene_to_ko", "ko_to_module", "module_to_pathway")
+        c("gene_to_ko", "ko_to_module", "ko_to_pathway", "module_to_pathway")
     )
     expect_identical(rownames(aggregated), c("genome_1", "genome_2", "genome_3"))
     expect_identical(
@@ -58,17 +58,23 @@ test_that("aggregateByLink follows multi-step functional mappings", {
         assays = "rna_gene_counts"
     )
 
-    expect_identical(rownames(aggregated), c("M001", "M002", "M003"))
+    expect_identical(
+        rownames(aggregated),
+        c("M00001", "M00002", "M00009", "M00115", "M00010", "M00011")
+    )
     expect_identical(
         SummarizedExperiment::rowData(aggregated)$module_id,
-        c("M001", "M002", "M003")
+        c("M00001", "M00002", "M00009", "M00115", "M00010", "M00011")
     )
     expect_identical(
         SummarizedExperiment::assay(aggregated, "rna_gene_counts"),
         rbind(
-            M001 = rnaGeneCounts(x)["gene_1", ] + rnaGeneCounts(x)["gene_3", ],
-            M002 = rnaGeneCounts(x)["gene_2", ] + rnaGeneCounts(x)["gene_5", ],
-            M003 = rnaGeneCounts(x)["gene_4", ] + rnaGeneCounts(x)["gene_6", ]
+            M00001 = rnaGeneCounts(x)["gene_1", ] + rnaGeneCounts(x)["gene_3", ],
+            M00002 = rnaGeneCounts(x)["gene_1", ] + rnaGeneCounts(x)["gene_3", ],
+            M00009 = rnaGeneCounts(x)["gene_2", ] + rnaGeneCounts(x)["gene_5", ],
+            M00115 = rnaGeneCounts(x)["gene_2", ] + rnaGeneCounts(x)["gene_5", ],
+            M00010 = rnaGeneCounts(x)["gene_4", ] + rnaGeneCounts(x)["gene_6", ],
+            M00011 = rnaGeneCounts(x)["gene_4", ] + rnaGeneCounts(x)["gene_6", ]
         )
     )
 })

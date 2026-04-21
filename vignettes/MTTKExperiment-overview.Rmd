@@ -30,6 +30,61 @@ The first version of the package focuses on one main container:
 well-established Bioconductor representation for assays, feature metadata,
 sample metadata, and optional trees.
 
+# How MTTK differs from edgeR, DESeq2, and limma-voom
+
+`edgeR`, `DESeq2`, and `limma-voom` are established Bioconductor workflows for
+differential expression on feature-by-sample expression matrices. They are
+especially strong when the main goal is to test each gene or transcript in a
+mostly flat experimental design.
+
+MTTK is not trying to replace those packages. Instead, it targets a different
+problem structure: genome-resolved metatranscriptomics, where genes are nested
+within genomes and gene-level RNA measurements may need to be interpreted
+alongside genome-level abundance data and functional hierarchies.
+
+In practice, the main differences are:
+
+- MTTK stores gene-level RNA and genome-level measurements together in one
+  container instead of assuming a single flat feature space.
+- MTTK treats the gene-to-genome relationship as part of the core data model.
+- MTTK keeps annotation mappings such as gene-to-KO, KO-to-module, and
+  KO-to-pathway explicit so that aggregation and modeling can move across
+  levels.
+- The first MTTK modeling workflow is KO-level mixed modeling with
+  genome-aware random effects, which is a different target from standard
+  gene-wise differential expression.
+
+The modeling approach also differs.
+
+- `edgeR` usually fits one negative-binomial GLM per feature in a flat
+  feature-by-sample design.
+- `DESeq2` usually fits one negative-binomial GLM per feature in a flat
+  feature-by-sample design.
+- `limma-voom` transforms counts to log-expression with precision weights and
+  then fits weighted linear models per feature.
+- MTTK's first KO workflow fits one `glmmTMB` negative-binomial mixed model per
+  KO after aggregating genes to KO-within-genome counts, so the same KO can be
+  modeled across multiple genomes with `genome_id` as a random intercept.
+
+This changes the immediate interpretation:
+
+- standard RNA-seq workflows are typically centered on feature-wise
+  differential expression,
+- the first MTTK KO workflow is centered on function-level association across
+  genomes,
+- the gene-level workflow in MTTK is separate from that and is intended to
+  answer the different question of which individual genes change.
+
+So a useful way to think about the relationship is:
+
+- use `edgeR`, `DESeq2`, or `limma-voom` when the main task is standard
+  feature-level differential expression on a count matrix,
+- use MTTK when the main task depends on explicit nesting across gene, genome,
+  and functional levels,
+- use both together when needed, with MTTK handling the container and
+  hierarchy-aware summaries around more conventional differential-expression
+  engines.
+
 # Container design
 
 An `MTTKExperiment` stores information at several levels:
@@ -99,9 +154,11 @@ target identifier columns.
 - `gene_to_genome` is the one special case: it is optional and, if stored, it
   must mirror `rowData(x)$genome_id` exactly.
 
-This means that chains such as `gene_to_ko -> ko_to_module ->
-module_to_pathway` are valid because each source namespace is anchored either
-in the object itself or in an upstream link target.
+This means that direct links such as `gene_to_ko`, `ko_to_module`, and
+`ko_to_pathway` can coexist with chained relationships such as
+`gene_to_ko -> ko_to_module -> module_to_pathway`. Direct KO-to-module and
+KO-to-pathway mappings are especially important because the same KO can
+participate in multiple modules and multiple pathways.
 
 # Current package structure
 
@@ -268,9 +325,52 @@ significantResults(ko_fit)
 annotateKOFit(ko_fit, x)
 ```
 
+If `KEGGREST` is available, `module_id` values can also be accompanied by
+module names, classes, and definitions retrieved directly from the KEGG module
+database.
+
+```{r eval = FALSE}
+module_table <- fetchKEGGModuleTable(c("M00001", "M00002"))
+annotateKOFit(ko_fit, x, moduleTable = module_table)
+```
+
 This workflow is aimed at KO-level differential expression or association
 analysis, where each KO may be observed in multiple genomes and the genome term
 should be modeled explicitly as a random intercept.
+
+# Gene-level models
+
+MTTK now also provides a separate gene-level workflow for the different
+question of which individual genes change across samples.
+
+This workflow does not use a genome random effect, because each gene belongs to
+one fixed parent genome. Instead, the genome-aware part enters through an
+optional genome-abundance offset.
+
+The first implementation supports two model specifications:
+
+- `model = "library_only"` uses
+  `rna_count ~ variable + offset(log(lib_size))`
+- `model = "library_plus_genome_abundance"` adds
+  `offset(log(genome_abundance + offsetPseudocount))`
+
+The corresponding model table can be inspected explicitly:
+
+```{r}
+gene_model_data <- makeGeneModelData(x, variable = "condition")
+head(as.data.frame(gene_model_data))
+S4Vectors::metadata(gene_model_data)$mttk_gene_model$effectLabel
+```
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+gene_fit <- fitGeneModel(x, variable = "condition")
+gene_fit
+fitInfo(gene_fit)$effectLabel
+as.data.frame(gene_fit)[, c("gene_id", "genome_id", "effect_label", "estimate", "q_value", "status")]
+```
+
+This is the workflow to use when the target of inference is the individual
+gene, rather than a function aggregated across genomes.
 
 # Subsetting behavior
 

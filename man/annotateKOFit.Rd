@@ -7,8 +7,9 @@
 annotateKOFit(
   x,
   object,
-  path = c("ko_to_module", "module_to_pathway"),
-  collapse = ";"
+  path = list(module = "ko_to_module", pathway = "ko_to_pathway"),
+  collapse = ";",
+  moduleTable = NULL
 )
 }
 \arguments{
@@ -16,10 +17,17 @@ annotateKOFit(
 
 \item{object}{An \code{MTTKExperiment} supplying the annotation link tables.}
 
-\item{path}{Character vector naming one or more annotation link tables to
-traverse.}
+\item{path}{A character vector naming one sequential annotation path, or a
+list of character vectors naming multiple paths to traverse in parallel.
+The default adds direct \code{ko_to_module} and \code{ko_to_pathway} annotations.}
 
 \item{collapse}{String used to combine multiple target identifiers per KO.}
+
+\item{moduleTable}{Optional KEGG module annotation table used to append
+module description columns when \code{module_id} annotations are present. This
+can be supplied as a file path, \code{data.frame}, or \code{S4Vectors::DataFrame}.
+\code{\link[=fetchKEGGModuleTable]{fetchKEGGModuleTable()}} can be used to retrieve this table directly from
+KEGG through \code{KEGGREST}.}
 }
 \value{
 An \code{MTTKFit} with appended annotation columns.
@@ -31,9 +39,10 @@ represent KO identifiers, such as the first KO-level mixed-model workflow in
 MTTK.
 }
 \details{
-By default the function follows \code{ko_to_module -> module_to_pathway} and adds
-\code{module_id} and \code{pathway_id} columns. When a KO maps to multiple downstream
-identifiers, the unique values are collapsed into a single string.
+By default the function follows two direct KO-centered mappings,
+\code{ko_to_module} and \code{ko_to_pathway}, and adds \code{module_id} and \code{pathway_id}
+columns. When a KO maps to multiple downstream identifiers, the unique
+values are collapsed into a single string.
 }
 \examples{
 fit <- MTTKFit(

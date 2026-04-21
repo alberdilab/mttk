@@ -29,6 +29,7 @@ Imports:
 Suggests:
     BiocStyle,
     glmmTMB,
+    KEGGREST,
     knitr,
     rmarkdown,
     testthat (>= 3.0.0)
