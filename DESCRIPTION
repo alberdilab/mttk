@@ -24,6 +24,7 @@ Imports:
     ape,
     glmmTMB,
     methods,
+    nlme,
     SingleCellExperiment,
     S4Vectors,
     SummarizedExperiment,

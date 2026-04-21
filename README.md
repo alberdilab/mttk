@@ -118,6 +118,9 @@ different module/pathway workflows.
   fit genomes first and then use `fitGenomePhylogeneticSignal()`.
 - If the question is "is there a subtree of related genomes with a shifted
   response?", fit genomes first and then use `scanGenomeClades()`.
+- If the question is "what is the average genome response after accounting for
+  the phylogenetic covariance among genomes?", fit genomes first and then use
+  `fitGenomePhylogeneticGLS()`.
 - If the question is "do genomes in a clade or taxonomic group respond
   coherently?", fit genomes first and then use
   `fitGenomeGroupMetaAnalysis(..., group = "domain")` or another grouping
@@ -127,7 +130,21 @@ different module/pathway workflows.
   `fitKOPhylogeneticSignal()`.
 - If the question is "is there a subtree where a KO responds in a distinct
   way?", fit KOs with random slopes first and then use `scanKOClades()`.
+- If the question is "what is the average KO response after accounting for
+  phylogenetic covariance among genomes?", fit KOs with random slopes first
+  and then use `fitKOPhylogeneticGLS()`.
 - If the question is "which individual genes change?", use `fitGeneModel()`.
+- If the question is "do closely related genomes tend to show similar
+  module- or pathway-level responses?", fit modules or pathways with random
+  slopes first and then use `fitModulePhylogeneticSignal()` or
+  `fitPathwayPhylogeneticSignal()`.
+- If the question is "is there a responding subtree for a module or pathway?",
+  fit modules or pathways with random slopes first and then use
+  `scanModuleClades()` or `scanPathwayClades()`.
+- If the question is "what is the average module or pathway response after
+  accounting for phylogenetic covariance among genomes?", fit modules or
+  pathways with random slopes first and then use
+  `fitModulePhylogeneticGLS()` or `fitPathwayPhylogeneticGLS()`.
 
 In practice, the KO meta-analysis route is the main higher-hierarchy option for
 KEGG-style annotations, because KO membership in modules and pathways is often
@@ -177,7 +194,11 @@ The current version already supports:
 - module- and pathway-level mixed models for total functional activity,
 - genome-level negative-binomial models,
 - tree-based summaries of genome-level responses,
-- tree-based summaries and clade scans for KO genome-specific responses,
+- phylogenetic GLS summaries of genome-level responses,
+- tree-based summaries, clade scans, and phylogenetic GLS summaries for KO
+  genome-specific responses,
+- tree-based summaries, clade scans, and phylogenetic GLS summaries for
+  module- and pathway-level genome-specific responses,
 - genome-group meta-analysis across genome metadata columns such as domain or
   clade,
 - gene-level negative-binomial models with optional parent-genome abundance

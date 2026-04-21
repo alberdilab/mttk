@@ -178,6 +178,16 @@ scanGenomeClades(genome_fit, x, nPerm = 99, minTips = 2)
 This is useful for questions such as "is there a subtree of related genomes
 that becomes more transcriptionally active during the oxygen pulse?"
 
+If the question is instead "what is the average genome response after
+accounting for phylogenetic covariance?", use the Brownian GLS follow-up.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+fitGenomePhylogeneticGLS(genome_fit, x)
+```
+
+This uses the fitted genome responses as the input and estimates a
+phylogenetically corrected mean response rather than a global signal statistic.
+
 # Question 3: Which KOs respond across genomes?
 
 KO-level modeling is the main function-centered workflow in MTTK. Gene-level
@@ -271,6 +281,16 @@ This is the right follow-up for questions such as "is there a related subset of
 genomes in which this KO is strongly induced, while the rest of the tree shows
 a weaker or opposite response?"
 
+If the question is "what is the average KO response after accounting for
+phylogenetic covariance among genomes?", fit the Brownian GLS summary instead.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+fitKOPhylogeneticGLS(ko_rs_fit, x)
+```
+
+This is useful when the goal is a phylogenetically corrected KO-level mean
+response, rather than a signal test or clade-localization step.
+
 # Question 5: Do higher-level functions show coherent KO-level responses?
 
 When a module or pathway contains several KOs, one useful question is whether
@@ -352,7 +372,31 @@ random-slope models.
 
 ```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
 moduleGenomeEffects(module_rs_fit)
-pathwayGenomeEffects(pathway_rs_fit)
+```
+
+The same follow-up can also be asked against the genome phylogeny.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+fitModulePhylogeneticSignal(module_rs_fit, x, nPerm = 99, minGenomes = 3)
+scanModuleClades(module_rs_fit, x, nPerm = 99, minTips = 2, minGenomes = 3)
+fitModulePhylogeneticGLS(module_rs_fit, x)
+```
+
+These three functions answer different questions:
+
+- `fitModulePhylogeneticSignal()` asks whether closely related genomes tend to
+  have similar module responses.
+- `scanModuleClades()` asks whether there is a subtree with a shifted module
+  response.
+- `fitModulePhylogeneticGLS()` asks for the average module response after
+  accounting for phylogenetic covariance.
+
+The same interface is available for pathways:
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+fitPathwayPhylogeneticSignal(pathway_rs_fit, x, nPerm = 99, minGenomes = 3)
+scanPathwayClades(pathway_rs_fit, x, nPerm = 99, minTips = 2, minGenomes = 3)
+fitPathwayPhylogeneticGLS(pathway_rs_fit, x)
 ```
 
 # Transparent aggregation helpers
@@ -381,6 +425,8 @@ The same `MTTKExperiment` can support several distinct biological questions:
 - whether higher-level functions show coherent KO responses,
 - whether total module/pathway activity shifts,
 - whether higher-level functional responses vary among genomes.
+- whether genome, KO, module, or pathway responses follow the genome
+  phylogeny globally, locally, or in a phylogenetically corrected mean sense.
 
 The key is to pick the workflow that matches the question:
 
