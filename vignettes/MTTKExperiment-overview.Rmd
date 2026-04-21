@@ -96,6 +96,8 @@ The most useful way to approach MTTK is to start from the biological question.
   KOs, respond across genomes?"
 - Use `fitKORandomSlopeModel()` when the question is "does the same KO behave
   differently in different genomes?"
+- Use `fitKOGroupInteractionModel()` when the question is "does the KO
+  response differ directly between two genome groups?"
 - Use `fitKOPhylogeneticSignal()` when the question is "for a given KO, do the
   genome-specific KO responses follow the phylogeny?"
 - Use `scanKOClades()` when the question is "is there a subtree where a KO
@@ -107,6 +109,9 @@ The most useful way to approach MTTK is to start from the biological question.
   response?"
 - Use `fitModuleMixedModel()` or `fitPathwayMixedModel()` when the question is
   "does total module/pathway activity change?"
+- Use `fitModuleGroupInteractionModel()` or
+  `fitPathwayGroupInteractionModel()` when the question is "does the
+  module/pathway response differ directly between two genome groups?"
 - Use `fitModuleRandomSlopeModel()` or `fitPathwayRandomSlopeModel()` when the
   question is "does the same module/pathway respond differently in different
   genomes?"
@@ -131,6 +136,17 @@ fitTable(gene_fit, sortBy = "q_value", n = 8)
 
 This is the most direct workflow when the target of inference is the individual
 gene.
+
+If you want to adjust for additional sample covariates while still testing one
+focal effect, use a formula and select the term explicitly.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+fitGeneModel(
+    x,
+    formula = ~ condition + oxygen,
+    term = "condition"
+)
+```
 
 # Question 2: Which genomes shift overall activity?
 
@@ -206,6 +222,17 @@ fitTable(annotateKOFit(ko_fit, x), sortBy = "q_value")
 Here the mixed model uses `genome_id` as a random intercept, so the same KO can
 be modeled across multiple parent genomes.
 
+The same workflow can adjust for additional sample covariates while keeping one
+KO-level condition term as the target of inference.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+fitKOMixedModel(
+    x,
+    formula = ~ condition + oxygen,
+    term = "condition"
+)
+```
+
 # Question 4: Does the same KO behave differently in different genomes?
 
 Some functions are conserved, but their regulation is not. A KO random-slope
@@ -227,6 +254,27 @@ ko_genome[ko_genome$ko_id == "K10002", c("ko_id", "genome_id", "conditional_effe
 That is the right follow-up when the question is something like:
 "does the same stress-response KO increase in bacteria but decrease in
 archaea?"
+
+## Directly testing KO differences between genome groups
+
+If the question is specifically whether the KO response differs between two
+genome groups, fit a direct interaction model rather than summarizing random
+slope estimates afterward.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+ko_group_fit <- fitKOGroupInteractionModel(
+    x,
+    formula = ~ condition + salinity,
+    term = "condition",
+    group = "domain",
+    genomeOffset = FALSE
+)
+
+fitTable(ko_group_fit, sortBy = "q_value")
+```
+
+This is useful for questions such as "is the condition effect for this KO
+different in Archaea versus Bacteria, after adjusting for salinity?"
 
 ## Summarizing KO responses within genome groups
 
@@ -308,6 +356,31 @@ fitTable(pathway_meta, sortBy = "q_value")
 
 This is a good choice when you want to keep KO-level modeling as the primary
 inferential layer and summarize upward afterward.
+
+If the question is instead whether the higher-level function responds
+differently between two genome groups, use a direct interaction model.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+module_group_fit <- fitModuleGroupInteractionModel(
+    x,
+    variable = "condition",
+    group = "domain",
+    genomeOffset = FALSE
+)
+
+pathway_group_fit <- fitPathwayGroupInteractionModel(
+    x,
+    variable = "condition",
+    group = "domain",
+    genomeOffset = FALSE
+)
+
+fitTable(module_group_fit, sortBy = "q_value")
+fitTable(pathway_group_fit, sortBy = "q_value")
+```
+
+This is the direct count-model answer to questions such as "does this pathway
+respond more strongly in archaea than in bacteria?"
 
 ## Choosing a membership mode for meta-analysis
 

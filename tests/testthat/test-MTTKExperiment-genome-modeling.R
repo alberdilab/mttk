@@ -44,6 +44,38 @@ test_that("makeGenomeModelData aggregates gene RNA to genomes by default", {
     expect_equal(one_row$genome_abundance_offset, one_row$genome_abundance + 1)
 })
 
+test_that("genome-level workflows support formulas with explicit tested terms", {
+    skip_if_not_installed("glmmTMB")
+
+    x <- makeExampleMTTKExperiment()
+    model_data <- makeGenomeModelData(
+        x,
+        formula = ~ condition + pH,
+        term = "condition",
+        genomeOffset = FALSE
+    )
+
+    model_state <- S4Vectors::metadata(model_data)$mttk_genome_model
+    expect_match(model_state$fixedFormula, "condition")
+    expect_match(model_state$fixedFormula, "pH")
+    expect_identical(model_state$testedTerm, "conditiontreated")
+    expect_identical(model_state$testedVariable, "condition")
+
+    fit <- fitGenomeModel(
+        x,
+        formula = ~ condition + pH,
+        term = "condition",
+        genomeOffset = FALSE
+    )
+
+    expect_s4_class(fit, "MTTKFit")
+    expect_true(all(as.character(fit$tested_term) == "conditiontreated"))
+    expect_identical(fitInfo(fit)$testedTerm, "conditiontreated")
+    expect_identical(fitInfo(fit)$testedVariable, "condition")
+    expect_match(fitInfo(fit)$fixedEffectsFormula, "condition")
+    expect_match(fitInfo(fit)$fixedEffectsFormula, "pH")
+})
+
 test_that("makeGenomeModelData can use a stored genome-level RNA assay", {
     x <- makeExampleMTTKExperiment()
     aggregated <- aggregateToGenome(x, assays = "rna_gene_counts")

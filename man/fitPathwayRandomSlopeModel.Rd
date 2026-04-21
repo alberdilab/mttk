@@ -6,7 +6,9 @@
 \usage{
 fitPathwayRandomSlopeModel(
   x,
-  variable,
+  variable = NULL,
+  formula = NULL,
+  term = NULL,
   assay = "rna_gene_counts",
   libraryOffset = TRUE,
   genomeOffset = NULL,
@@ -14,14 +16,27 @@ fitPathwayRandomSlopeModel(
   libSize = NULL,
   genomeAssay = "dna_genome_counts",
   offsetPseudocount = 1,
+  referenceLevels = NULL,
+  randomSlope = NULL,
   keepFits = FALSE
 )
 }
 \arguments{
 \item{x}{An \code{MTTKExperiment}.}
 
-\item{variable}{A single sample-level column name from \code{colData(x)}. The
-column must be numeric or a factor with exactly two levels.}
+\item{variable}{A single sample-level column name from \code{colData(x)} for the
+simple one-variable interface. The column must be numeric or a factor with
+exactly two levels. Supply exactly one of \code{variable} or \code{formula}.}
+
+\item{formula}{Optional one-sided or two-sided fixed-effect formula for the
+sample-level covariates, for example \code{~ condition + salinity} or
+\code{rna_count ~ condition + salinity}. Offsets and genome-level random
+effects are added internally by MTTK. Supply exactly one of \code{variable} or
+\code{formula}.}
+
+\item{term}{Optional fixed-effect term to extract from a formula-based fit.
+This is required when the fixed-effect formula defines more than one tested
+term.}
 
 \item{assay}{Gene-level assay name used as the RNA response.}
 
@@ -44,6 +59,14 @@ numeric vector with one value per sample.}
 
 \item{offsetPseudocount}{Non-negative pseudocount added to genome abundance
 before log-offset calculation.}
+
+\item{referenceLevels}{Optional named list or named character vector setting
+the reference levels of factor-like sample covariates before model fitting.}
+
+\item{randomSlope}{Optional sample-level variable whose genome-specific slope
+should be estimated. When \code{variable} is supplied, MTTK uses that variable.
+When \code{formula} is supplied, \code{randomSlope} can be omitted only if MTTK can
+infer a single tested variable unambiguously.}
 
 \item{keepFits}{Logical; if \code{TRUE}, store the backend \code{glmmTMB} model objects
 in the returned \code{MTTKFit}.}

@@ -83,6 +83,53 @@ test_that("makeKOMixedModelData aligns KO/genome observations and offsets", {
     expect_equal(one_row$genome_abundance_offset, one_row$genome_abundance + 1)
 })
 
+test_that("KO mixed-model workflows support formulas with explicit tested terms", {
+    skip_if_not_installed("glmmTMB")
+
+    x <- makeShowcaseMTTKExperiment()
+    model_data <- makeKOMixedModelData(
+        x,
+        formula = ~ condition + salinity,
+        term = "condition",
+        genomeOffset = FALSE
+    )
+
+    model_state <- S4Vectors::metadata(model_data)$mttk_ko_model
+    expect_match(model_state$fixedFormula, "condition")
+    expect_match(model_state$fixedFormula, "salinity")
+    expect_identical(model_state$testedTerm, "conditionoxygen_pulse")
+    expect_identical(model_state$testedVariable, "condition")
+
+    fit <- fitKOMixedModel(
+        x,
+        formula = ~ condition + salinity,
+        term = "condition",
+        genomeOffset = FALSE
+    )
+
+    expect_s4_class(fit, "MTTKFit")
+    expect_true(all(as.character(fit$tested_term) == "conditionoxygen_pulse"))
+    expect_identical(fitInfo(fit)$testedTerm, "conditionoxygen_pulse")
+    expect_identical(fitInfo(fit)$testedVariable, "condition")
+    expect_match(fitInfo(fit)$fixedEffectsFormula, "condition")
+    expect_match(fitInfo(fit)$fixedEffectsFormula, "salinity")
+})
+
+test_that("multi-term KO formulas require explicit term selection", {
+    skip_if_not_installed("glmmTMB")
+
+    x <- makeShowcaseMTTKExperiment()
+
+    expect_error(
+        fitKOMixedModel(
+            x,
+            formula = ~ condition + salinity,
+            genomeOffset = FALSE
+        ),
+        "multiple tested terms"
+    )
+})
+
 test_that("aggregateToModuleGenome returns module/genome counts with many-to-many mappings", {
     x <- makeExampleMTTKExperiment()
     aggregated <- aggregateToModuleGenome(x)
@@ -351,6 +398,92 @@ test_that("fitKORandomSlopeModel stores KO-by-genome conditional effects", {
     expect_true(all(unique(as.character(effects$ko_id)) %in% rownames(fit)))
 })
 
+test_that("random-slope KO models support formulas and explicit randomSlope selection", {
+    skip_if_not_installed("glmmTMB")
+
+    x <- makeShowcaseMTTKExperiment()
+    fit <- suppressWarnings(
+        fitKORandomSlopeModel(
+            x,
+            formula = ~ condition + salinity,
+            term = "condition",
+            randomSlope = "condition",
+            genomeOffset = FALSE
+        )
+    )
+
+    expect_s4_class(fit, "MTTKFit")
+    expect_true(all(as.character(fit$tested_term) == "conditionoxygen_pulse"))
+    expect_identical(fitInfo(fit)$testedTerm, "conditionoxygen_pulse")
+    expect_identical(fitInfo(fit)$testedVariable, "condition")
+    expect_identical(fitInfo(fit)$randomSlopeVariable, "condition")
+})
+
+test_that("KO group interaction models fit direct genome-group contrasts", {
+    skip_if_not_installed("glmmTMB")
+
+    x <- makeShowcaseMTTKExperiment()
+    fit <- fitKOGroupInteractionModel(
+        x,
+        variable = "condition",
+        group = "domain",
+        genomeOffset = FALSE
+    )
+
+    expect_s4_class(fit, "MTTKFit")
+    expect_identical(fitInfo(fit)$model, "ko_group_interaction_model")
+    expect_identical(fitInfo(fit)$groupColumn, "domain")
+    expect_identical(fitInfo(fit)$groupReferenceLevel, "Bacteria")
+    expect_identical(fitInfo(fit)$groupContrastLevel, "Archaea")
+    expect_identical(fitInfo(fit)$interactionVariable, "condition")
+    expect_true(all(c(
+        "group_column",
+        "group_reference_level",
+        "group_contrast_level",
+        "base_tested_term",
+        "group_term"
+    ) %in% names(fit)))
+    expect_true(any(as.character(fit$status) == "ok"))
+    expect_true(all(as.character(fit$group_column) == "domain"))
+    expect_true(all(as.character(fit$group_reference_level) == "Bacteria"))
+    expect_true(all(as.character(fit$group_contrast_level) == "Archaea"))
+})
+
+test_that("KO group interaction models support covariate formulas", {
+    skip_if_not_installed("glmmTMB")
+
+    x <- makeShowcaseMTTKExperiment()
+    fit <- fitKOGroupInteractionModel(
+        x,
+        formula = ~ condition + salinity,
+        term = "condition",
+        group = "domain",
+        genomeOffset = FALSE
+    )
+
+    expect_s4_class(fit, "MTTKFit")
+    expect_identical(fitInfo(fit)$interactionVariable, "condition")
+    expect_match(fitInfo(fit)$fixedEffectsFormula, "salinity")
+    expect_match(fitInfo(fit)$formula, "genome_group")
+    expect_true(any(grepl("genome_group", as.character(fit$tested_term), fixed = TRUE)))
+})
+
+test_that("KO group interaction models validate the selected genome groups", {
+    skip_if_not_installed("glmmTMB")
+
+    x <- makeShowcaseMTTKExperiment()
+
+    expect_error(
+        fitKOGroupInteractionModel(
+            x,
+            variable = "condition",
+            group = "clade",
+            genomeOffset = FALSE
+        ),
+        "exactly two usable groups"
+    )
+})
+
 test_that("fitModuleMixedModel fits one mixed model per module", {
     skip_if_not_installed("glmmTMB")
 
@@ -415,6 +548,34 @@ test_that("fitModuleRandomSlopeModel stores module-by-genome conditional effects
         "conditional_effect_std_error"
     ) %in% names(effects)))
     expect_true(all(unique(as.character(effects$module_id)) %in% rownames(fit)))
+})
+
+test_that("module and pathway group interaction models fit direct genome-group contrasts", {
+    skip_if_not_installed("glmmTMB")
+
+    x <- makeShowcaseMTTKExperiment()
+
+    module_fit <- fitModuleGroupInteractionModel(
+        x,
+        variable = "condition",
+        group = "domain",
+        genomeOffset = FALSE
+    )
+    pathway_fit <- fitPathwayGroupInteractionModel(
+        x,
+        variable = "condition",
+        group = "domain",
+        genomeOffset = FALSE
+    )
+
+    expect_s4_class(module_fit, "MTTKFit")
+    expect_s4_class(pathway_fit, "MTTKFit")
+    expect_identical(fitInfo(module_fit)$model, "module_group_interaction_model")
+    expect_identical(fitInfo(pathway_fit)$model, "pathway_group_interaction_model")
+    expect_identical(fitInfo(module_fit)$groupColumn, "domain")
+    expect_identical(fitInfo(pathway_fit)$groupColumn, "domain")
+    expect_true(any(as.character(module_fit$status) == "ok"))
+    expect_true(any(as.character(pathway_fit$status) == "ok"))
 })
 
 test_that("fitPathwayMixedModel fits one mixed model per pathway", {

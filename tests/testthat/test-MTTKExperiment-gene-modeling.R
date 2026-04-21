@@ -49,6 +49,38 @@ test_that("makeGeneModelData aligns gene/sample observations and offsets", {
     expect_equal(one_row$genome_abundance_offset, one_row$genome_abundance + 1)
 })
 
+test_that("gene-level workflows support formulas with explicit tested terms", {
+    skip_if_not_installed("glmmTMB")
+
+    x <- makeExampleMTTKExperiment()
+    model_data <- makeGeneModelData(
+        x,
+        formula = ~ condition + pH,
+        term = "condition",
+        genomeOffset = FALSE
+    )
+
+    model_state <- S4Vectors::metadata(model_data)$mttk_gene_model
+    expect_match(model_state$fixedFormula, "condition")
+    expect_match(model_state$fixedFormula, "pH")
+    expect_identical(model_state$testedTerm, "conditiontreated")
+    expect_identical(model_state$testedVariable, "condition")
+
+    fit <- fitGeneModel(
+        x,
+        formula = ~ condition + pH,
+        term = "condition",
+        genomeOffset = FALSE
+    )
+
+    expect_s4_class(fit, "MTTKFit")
+    expect_true(all(as.character(fit$tested_term) == "conditiontreated"))
+    expect_identical(fitInfo(fit)$testedTerm, "conditiontreated")
+    expect_identical(fitInfo(fit)$testedVariable, "condition")
+    expect_match(fitInfo(fit)$fixedEffectsFormula, "condition")
+    expect_match(fitInfo(fit)$fixedEffectsFormula, "pH")
+})
+
 test_that("fitGeneModel fits the library-only gene model", {
     skip_if_not_installed("glmmTMB")
 

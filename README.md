@@ -70,6 +70,12 @@ So the current MTTK workflow answers a different question:
   to a module or pathway are coherent, or whether total module/pathway activity
   shifts across samples.
 
+Most modeling functions in MTTK support two user-facing interfaces:
+
+- `variable = "condition"` for the simple one-variable case
+- `formula = ~ condition + pH` plus `term = "condition"` when you want to
+  adjust for additional sample covariates but still test one focal effect
+
 ## Choosing An Analysis
 
 The higher-level question matters, because MTTK currently supports two
@@ -80,6 +86,9 @@ different module/pathway workflows.
 - If the question is "does the same KO respond differently across genomes?",
   use `fitKORandomSlopeModel()` and then inspect the genome-specific KO effects
   with `koGenomeEffects()`.
+- If the question is "does the KO response differ directly between two genome
+  groups, such as Bacteria and Archaea?", use
+  `fitKOGroupInteractionModel(..., group = "domain")`.
 - If the question is "within a taxonomic group or clade, does this KO show a
   coherent genome-specific response?", fit KOs with random slopes first and
   then use `fitKOGenomeGroupMetaAnalysis(..., group = "domain")` or another
@@ -108,6 +117,9 @@ different module/pathway workflows.
   negative-binomial mixed models to counts, and splitting overlapping
   assignments would create fractional pseudo-counts rather than observed
   counts.
+- If the question is "does the module or pathway response differ directly
+  between two genome groups?", use `fitModuleGroupInteractionModel()` or
+  `fitPathwayGroupInteractionModel()`.
 - If the question is "does the same module or pathway respond differently
   across genomes?", use `fitModuleRandomSlopeModel()` or
   `fitPathwayRandomSlopeModel()` and then inspect the genome-specific

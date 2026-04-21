@@ -114,6 +114,830 @@
 .normalize_model_variable <- .normalize_ko_model_variable
 .normalize_model_lib_size <- .normalize_ko_model_lib_size
 
+.normalize_reference_levels <- function(referenceLevels) {
+    if (is.null(referenceLevels)) {
+        return(list())
+    }
+
+    if (!is.list(referenceLevels)) {
+        referenceLevels <- as.list(referenceLevels)
+    }
+
+    reference_names <- names(referenceLevels)
+    if (is.null(reference_names) || anyNA(reference_names) || any(reference_names == "")) {
+        stop(
+            "'referenceLevels' must be NULL or a named list/vector of factor reference levels.",
+            call. = FALSE
+        )
+    }
+
+    normalized <- lapply(referenceLevels, function(x) {
+        if (!is.character(x) || length(x) != 1L || is.na(x) || x == "") {
+            stop(
+                "Each entry of 'referenceLevels' must be a single non-empty character string.",
+                call. = FALSE
+            )
+        }
+
+        x
+    })
+    names(normalized) <- reference_names
+    normalized
+}
+
+.coerce_model_column <- function(values, column_name, reference_level = NULL, require_binary_factor = FALSE) {
+    if (is.character(values)) {
+        values <- factor(values, levels = unique(values))
+    } else if (is.logical(values)) {
+        values <- factor(as.character(values), levels = unique(as.character(values)))
+    } else if (is.factor(values)) {
+        values <- droplevels(values)
+    } else if (is.integer(values) || is.numeric(values)) {
+        values <- as.numeric(values)
+    } else {
+        stop(
+            "Modeling variable '",
+            column_name,
+            "' must be numeric, integer, logical, character, or factor.",
+            call. = FALSE
+        )
+    }
+
+    if (is.factor(values) && !is.null(reference_level)) {
+        if (!(reference_level %in% levels(values))) {
+            stop(
+                "Reference level '",
+                reference_level,
+                "' is not present in sample variable '",
+                column_name,
+                "'.",
+                call. = FALSE
+            )
+        }
+
+        values <- stats::relevel(values, ref = reference_level)
+        values <- droplevels(values)
+    }
+
+    if (anyNA(values)) {
+        stop("Modeling variable '", column_name, "' must not contain missing values.", call. = FALSE)
+    }
+
+    if (is.factor(values)) {
+        if (nlevels(values) < 2L) {
+            stop(
+                "Modeling factor '",
+                column_name,
+                "' must contain at least two levels.",
+                call. = FALSE
+            )
+        }
+
+        if (isTRUE(require_binary_factor) && nlevels(values) != 2L) {
+            stop(
+                "Modeling variable '",
+                column_name,
+                "' must be numeric or a factor with exactly two levels in the simple variable interface.",
+                call. = FALSE
+            )
+        }
+    } else if (length(unique(values)) < 2L) {
+        stop(
+            "Modeling variable '",
+            column_name,
+            "' must vary across samples before the model can be fit.",
+            call. = FALSE
+        )
+    }
+
+    values
+}
+
+.model_sample_frame <- function(
+    x,
+    variables,
+    referenceLevels = NULL,
+    require_binary_variables = character()
+) {
+    sample_data <- as.data.frame(
+        SummarizedExperiment::colData(x),
+        stringsAsFactors = FALSE
+    )
+    sample_ids <- colnames(x)
+    reference_levels <- .normalize_reference_levels(referenceLevels)
+
+    variables <- unique(as.character(variables))
+    if (length(variables) == 0L || anyNA(variables) || any(variables == "")) {
+        stop("At least one valid sample-level modeling variable is required.", call. = FALSE)
+    }
+
+    missing_variables <- setdiff(variables, names(sample_data))
+    if (length(missing_variables) > 0L) {
+        stop(
+            "Unknown sample-level variable(s): ",
+            paste(missing_variables, collapse = ", "),
+            ".",
+            call. = FALSE
+        )
+    }
+
+    frame <- sample_data[, variables, drop = FALSE]
+    rownames(frame) <- sample_ids
+
+    for (variable in variables) {
+        frame[[variable]] <- .coerce_model_column(
+            values = frame[[variable]],
+            column_name = variable,
+            reference_level = reference_levels[[variable]],
+            require_binary_factor = variable %in% require_binary_variables
+        )
+    }
+
+    frame
+}
+
+.normalize_fixed_effect_formula <- function(formula) {
+    if (!inherits(formula, "formula")) {
+        stop("'formula' must be a formula object.", call. = FALSE)
+    }
+
+    rhs <- if (length(formula) == 2L) {
+        formula[[2L]]
+    } else if (length(formula) == 3L) {
+        formula[[3L]]
+    } else {
+        stop("'formula' must be a one-sided or two-sided formula.", call. = FALSE)
+    }
+
+    rhs_formula <- stats::as.formula(call("~", rhs))
+    formula_text <- paste(deparse(rhs_formula), collapse = " ")
+
+    if (grepl("\\|", formula_text)) {
+        stop(
+            "Random effects should not be included in 'formula'; MTTK adds the supported genome-level random effects internally.",
+            call. = FALSE
+        )
+    }
+
+    if (grepl("offset\\s*\\(", formula_text)) {
+        stop(
+            "Offsets should not be included in 'formula'; use 'libraryOffset' and 'genomeOffset' instead.",
+            call. = FALSE
+        )
+    }
+
+    rhs_formula
+}
+
+.available_model_terms <- function(fixed_formula, sample_data) {
+    matrix <- stats::model.matrix(fixed_formula, data = sample_data)
+    setdiff(colnames(matrix), "(Intercept)")
+}
+
+.term_matches_variable <- function(term, variable) {
+    stripped_term <- gsub("`", "", as.character(term), fixed = TRUE)
+    stripped_variable <- gsub("`", "", as.character(variable), fixed = TRUE)
+
+    identical(stripped_term, stripped_variable) ||
+        startsWith(stripped_term, stripped_variable)
+}
+
+.infer_tested_variable <- function(sample_data, tested_term) {
+    if (is.null(tested_term) || is.na(tested_term)) {
+        return(NA_character_)
+    }
+
+    variables <- names(sample_data)
+    matches <- variables[vapply(
+        variables,
+        function(variable) .term_matches_variable(tested_term, variable),
+        logical(1)
+    )]
+
+    if (length(matches) == 1L) {
+        matches[[1L]]
+    } else {
+        NA_character_
+    }
+}
+
+.describe_tested_term <- function(sample_data, tested_term, tested_variable = NA_character_) {
+    tested_variable <- as.character(tested_variable)
+    if (!is.na(tested_variable) &&
+        tested_variable %in% names(sample_data)) {
+        values <- sample_data[[tested_variable]]
+
+        if (is.numeric(values)) {
+            return(list(
+                variable = tested_variable,
+                type = "numeric",
+                referenceLevel = NA_character_,
+                contrastLevel = NA_character_,
+                effectLabel = paste0(tested_variable, " per unit increase")
+            ))
+        }
+
+        if (is.factor(values) && nlevels(values) == 2L) {
+            return(list(
+                variable = tested_variable,
+                type = "two_level_factor",
+                referenceLevel = levels(values)[1L],
+                contrastLevel = levels(values)[2L],
+                effectLabel = paste0(
+                    tested_variable,
+                    ": ",
+                    levels(values)[2L],
+                    " vs ",
+                    levels(values)[1L]
+                )
+            ))
+        }
+    }
+
+    list(
+        variable = if (!is.na(tested_variable)) tested_variable else as.character(tested_term),
+        type = "model_term",
+        referenceLevel = NA_character_,
+        contrastLevel = NA_character_,
+        effectLabel = as.character(tested_term)
+    )
+}
+
+.resolve_formula_random_slope <- function(sample_data, randomSlope, tested_variable, fixed_variables) {
+    if (is.null(randomSlope)) {
+        random_slope <- tested_variable
+    } else {
+        random_slope <- as.character(randomSlope)
+    }
+
+    if (length(random_slope) != 1L || is.na(random_slope) || random_slope == "") {
+        return(NA_character_)
+    }
+
+    if (!(random_slope %in% fixed_variables)) {
+        stop(
+            "'randomSlope' must name a sample-level variable present in the fixed-effect formula.",
+            call. = FALSE
+        )
+    }
+
+    values <- sample_data[[random_slope]]
+    if (!(is.numeric(values) || is.factor(values))) {
+        stop(
+            "The random-slope variable '",
+            random_slope,
+            "' must be numeric or factor-like.",
+            call. = FALSE
+        )
+    }
+
+    random_slope
+}
+
+.normalize_model_spec <- function(
+    x,
+    variable = NULL,
+    formula = NULL,
+    term = NULL,
+    referenceLevels = NULL,
+    randomSlope = NULL,
+    allow_formula = TRUE,
+    allow_random_slope = FALSE
+) {
+    has_variable <- !is.null(variable)
+    has_formula <- !is.null(formula)
+
+    if (has_variable == has_formula) {
+        stop("Provide exactly one of 'variable' or 'formula'.", call. = FALSE)
+    }
+
+    if (!is.null(term) &&
+        (!is.character(term) || length(term) != 1L || is.na(term) || term == "")) {
+        stop("'term' must be NULL or a single non-empty character string.", call. = FALSE)
+    }
+
+    if (has_variable) {
+        variable <- as.character(variable)
+        if (length(variable) != 1L || is.na(variable) || variable == "") {
+            stop("'variable' must be a single non-empty column name from colData(x).", call. = FALSE)
+        }
+
+        sample_data <- .model_sample_frame(
+            x = x,
+            variables = variable,
+            referenceLevels = referenceLevels,
+            require_binary_variables = variable
+        )
+        fixed_formula <- stats::as.formula(paste0("~ `", variable, "`"))
+        candidate_terms <- .available_model_terms(fixed_formula, sample_data)
+        tested_term <- .resolve_requested_model_term(
+            term = if (is.null(term)) variable else term,
+            candidates = candidate_terms,
+            strict = TRUE,
+            term_label = "term"
+        )
+        term_info <- .describe_tested_term(
+            sample_data = sample_data,
+            tested_term = tested_term,
+            tested_variable = variable
+        )
+
+        return(list(
+            mode = "variable",
+            sampleData = sample_data,
+            fixedVariables = variable,
+            fixedFormula = fixed_formula,
+            fixedFormulaLabel = paste(deparse(fixed_formula), collapse = " "),
+            availableTerms = candidate_terms,
+            testedTermInput = if (is.null(term)) variable else term,
+            testedTerm = tested_term,
+            testedVariable = variable,
+            variable = term_info$variable,
+            variableType = term_info$type,
+            referenceLevel = term_info$referenceLevel,
+            contrastLevel = term_info$contrastLevel,
+            effectLabel = term_info$effectLabel,
+            randomSlopeVariable = if (allow_random_slope) variable else NA_character_
+        ))
+    }
+
+    if (!allow_formula) {
+        stop("This workflow does not support 'formula' yet.", call. = FALSE)
+    }
+
+    fixed_formula <- .normalize_fixed_effect_formula(formula)
+    fixed_variables <- all.vars(fixed_formula)
+    sample_data <- .model_sample_frame(
+        x = x,
+        variables = fixed_variables,
+        referenceLevels = referenceLevels
+    )
+    candidate_terms <- .available_model_terms(fixed_formula, sample_data)
+    tested_term <- if (length(candidate_terms) == 0L) {
+        NA_character_
+    } else if (is.null(term)) {
+        if (length(candidate_terms) == 1L) candidate_terms[[1L]] else NA_character_
+    } else {
+        .resolve_requested_model_term(
+            term = term,
+            candidates = candidate_terms,
+            strict = TRUE,
+            term_label = "term"
+        )
+    }
+    tested_variable <- .infer_tested_variable(sample_data, tested_term)
+    term_info <- .describe_tested_term(
+        sample_data = sample_data,
+        tested_term = if (is.na(tested_term)) {
+            if (!is.null(term)) term else NA_character_
+        } else {
+            tested_term
+        },
+        tested_variable = tested_variable
+    )
+
+    list(
+        mode = "formula",
+        sampleData = sample_data,
+        fixedVariables = fixed_variables,
+        fixedFormula = fixed_formula,
+        fixedFormulaLabel = paste(deparse(fixed_formula), collapse = " "),
+        availableTerms = candidate_terms,
+        testedTermInput = if (!is.null(term)) term else NA_character_,
+        testedTerm = tested_term,
+        testedVariable = tested_variable,
+        variable = term_info$variable,
+        variableType = term_info$type,
+        referenceLevel = term_info$referenceLevel,
+        contrastLevel = term_info$contrastLevel,
+        effectLabel = term_info$effectLabel,
+        randomSlopeVariable = if (allow_random_slope) {
+            .resolve_formula_random_slope(
+                sample_data = sample_data,
+                randomSlope = randomSlope,
+                tested_variable = tested_variable,
+                fixed_variables = fixed_variables
+            )
+        } else {
+            NA_character_
+        }
+    )
+}
+
+.require_model_spec_term <- function(model_spec) {
+    if ((is.null(model_spec$testedTerm) || is.na(model_spec$testedTerm)) &&
+        length(model_spec$availableTerms) > 1L) {
+        stop(
+            "The fixed-effect formula produces multiple tested terms. Supply 'term' to select one of: ",
+            paste(model_spec$availableTerms, collapse = ", "),
+            ".",
+            call. = FALSE
+        )
+    }
+
+    invisible(model_spec)
+}
+
+.normalize_group_levels <- function(values, group_column, groupLevels = NULL) {
+    values <- as.character(values)
+    values <- values[!is.na(values) & values != ""]
+
+    if (length(values) == 0L) {
+        stop(
+            "No usable genome group memberships were found in genomeData(x)$",
+            group_column,
+            ".",
+            call. = FALSE
+        )
+    }
+
+    if (is.null(groupLevels)) {
+        levels <- unique(values)
+        if (length(levels) != 2L) {
+            stop(
+                "Genome grouping column '",
+                group_column,
+                "' must contain exactly two usable groups for this workflow. ",
+                "Supply 'groupLevels' to select two groups explicitly.",
+                call. = FALSE
+            )
+        }
+
+        return(levels)
+    }
+
+    if (!is.character(groupLevels) ||
+        length(groupLevels) != 2L ||
+        anyNA(groupLevels) ||
+        any(groupLevels == "") ||
+        length(unique(groupLevels)) != 2L) {
+        stop(
+            "'groupLevels' must be a character vector of length 2 giving the reference and contrast genome groups.",
+            call. = FALSE
+        )
+    }
+
+    missing_levels <- setdiff(groupLevels, unique(values))
+    if (length(missing_levels) > 0L) {
+        stop(
+            "Unknown genome group level(s): ",
+            paste(missing_levels, collapse = ", "),
+            ".",
+            call. = FALSE
+        )
+    }
+
+    groupLevels
+}
+
+.normalize_feature_group_spec <- function(object, group, groupLevels = NULL) {
+    mapping <- .genome_group_mapping_df(object, group_column = group)
+    levels <- .normalize_group_levels(
+        values = mapping$group_id,
+        group_column = group,
+        groupLevels = groupLevels
+    )
+
+    mapping <- mapping[mapping$group_id %in% levels, , drop = FALSE]
+    mapping$genome_group <- factor(mapping$group_id, levels = levels)
+    mapping <- mapping[!duplicated(mapping$genome_id), c("genome_id", "genome_group"), drop = FALSE]
+    rownames(mapping) <- mapping$genome_id
+
+    list(
+        groupColumn = group,
+        levels = levels,
+        referenceLevel = levels[[1L]],
+        contrastLevel = levels[[2L]],
+        mapping = mapping
+    )
+}
+
+.require_group_interaction_model_spec <- function(model_spec) {
+    .require_model_spec_term(model_spec)
+
+    if (is.null(model_spec$testedVariable) ||
+        is.na(model_spec$testedVariable) ||
+        model_spec$testedVariable == "") {
+        stop(
+            "Group-interaction models require a tested term that can be matched to a single sample-level variable.",
+            call. = FALSE
+        )
+    }
+
+    if (identical(model_spec$variableType, "model_term")) {
+        stop(
+            "Group-interaction models currently support numeric or two-level factor tested variables only.",
+            call. = FALSE
+        )
+    }
+
+    invisible(model_spec)
+}
+
+.build_feature_group_interaction_data <- function(model_data, object, group, groupLevels = NULL) {
+    group_spec <- .normalize_feature_group_spec(
+        object = object,
+        group = group,
+        groupLevels = groupLevels
+    )
+
+    obs <- as.data.frame(model_data, stringsAsFactors = FALSE)
+    matched <- match(obs$genome_id, rownames(group_spec$mapping))
+    keep <- !is.na(matched)
+    obs <- obs[keep, , drop = FALSE]
+
+    if (nrow(obs) == 0L) {
+        stop(
+            "No feature/genome observations could be aligned to the selected genome groups.",
+            call. = FALSE
+        )
+    }
+
+    obs$genome_group <- factor(
+        as.character(group_spec$mapping$genome_group[matched[keep]]),
+        levels = group_spec$levels
+    )
+
+    out <- S4Vectors::DataFrame(obs, check.names = FALSE)
+    metadata_list <- S4Vectors::metadata(model_data)$mttk_function_mixed_model
+    metadata_list$groupColumn <- group_spec$groupColumn
+    metadata_list$groupReferenceLevel <- group_spec$referenceLevel
+    metadata_list$groupContrastLevel <- group_spec$contrastLevel
+    metadata_list$groupLevels <- group_spec$levels
+    S4Vectors::metadata(out)$mttk_function_group_interaction <- metadata_list
+    out
+}
+
+.feature_group_interaction_formula <- function(
+    model_spec,
+    specification,
+    group_variable = "genome_group"
+) {
+    tested_variable <- model_spec$testedVariable
+    if (is.null(tested_variable) || is.na(tested_variable) || tested_variable == "") {
+        stop(
+            "Group-interaction models require a tested variable that can be identified from the fixed effects.",
+            call. = FALSE
+        )
+    }
+
+    rhs_terms <- c(
+        paste(deparse(model_spec$fixedFormula[[2L]]), collapse = " "),
+        paste0("`", group_variable, "`"),
+        paste0("`", tested_variable, "`:`", group_variable, "`")
+    )
+
+    .compose_response_formula(
+        fixed_formula = stats::as.formula(paste("~", paste(rhs_terms, collapse = " + "))),
+        specification = specification,
+        random_effect = "(1 | genome_id)"
+    )
+}
+
+.resolve_feature_group_interaction_term <- function(
+    model_spec,
+    coefficient_table,
+    group_variable,
+    group_contrast_level
+) {
+    tested_term <- .resolve_fitted_tested_term(model_spec, coefficient_table)
+    candidates <- setdiff(rownames(coefficient_table), "(Intercept)")
+    group_term <- .resolve_requested_model_term(
+        term = paste0(group_variable, group_contrast_level),
+        candidates = candidates,
+        strict = TRUE,
+        term_label = "group term"
+    )
+
+    strip_ticks <- function(x) {
+        gsub("`", "", as.character(x), fixed = TRUE)
+    }
+
+    interaction_candidates <- candidates[grepl(":", candidates, fixed = TRUE)]
+    tested_clean <- strip_ticks(tested_term)
+    group_clean <- strip_ticks(group_term)
+    matches <- interaction_candidates[vapply(interaction_candidates, function(candidate) {
+        parts <- strsplit(strip_ticks(candidate), ":", fixed = TRUE)[[1L]]
+        tested_clean %in% parts && group_clean %in% parts
+    }, logical(1))]
+
+    if (length(matches) != 1L) {
+        stop(
+            "Could not resolve a unique interaction coefficient for tested term '",
+            tested_term,
+            "' and genome group contrast '",
+            group_contrast_level,
+            "'.",
+            call. = FALSE
+        )
+    }
+
+    list(
+        interactionTerm = matches[[1L]],
+        baseTerm = tested_term,
+        groupTerm = group_term
+    )
+}
+
+.group_interaction_effect_label <- function(base_effect_label, group_spec) {
+    paste0(
+        base_effect_label,
+        " difference in ",
+        group_spec$contrastLevel,
+        " vs ",
+        group_spec$referenceLevel
+    )
+}
+
+.empty_feature_group_interaction_row <- function(
+    feature_id,
+    feature_summary,
+    variable_info,
+    feature_id_column,
+    group_spec
+) {
+    row <- .empty_feature_mixed_model_row(
+        feature_id = feature_id,
+        feature_summary = feature_summary,
+        variable_info = variable_info,
+        feature_id_column = feature_id_column
+    )
+
+    row$base_tested_term <- NA_character_
+    row$group_term <- NA_character_
+    row$group_column <- group_spec$groupColumn
+    row$group_reference_level <- group_spec$referenceLevel
+    row$group_contrast_level <- group_spec$contrastLevel
+    row <- row[, c(
+        feature_id_column,
+        "base_tested_term",
+        "tested_term",
+        "group_term",
+        "group_column",
+        "group_reference_level",
+        "group_contrast_level",
+        setdiff(
+            names(row),
+            c(
+                feature_id_column,
+                "base_tested_term",
+                "tested_term",
+                "group_term",
+                "group_column",
+                "group_reference_level",
+                "group_contrast_level"
+            )
+        )
+    )]
+    row
+}
+
+.fit_one_feature_group_interaction_model <- function(
+    data,
+    feature_id,
+    feature_summary,
+    model_spec,
+    model,
+    keep_fits,
+    feature_id_column,
+    feature_label,
+    group_spec
+) {
+    variable_info <- list(
+        type = paste0(model_spec$variableType, "_group_interaction"),
+        referenceLevel = model_spec$referenceLevel,
+        contrastLevel = model_spec$contrastLevel,
+        effectLabel = .group_interaction_effect_label(
+            base_effect_label = model_spec$effectLabel,
+            group_spec = group_spec
+        )
+    )
+    row <- .empty_feature_group_interaction_row(
+        feature_id = feature_id,
+        feature_summary = feature_summary,
+        variable_info = variable_info,
+        feature_id_column = feature_id_column,
+        group_spec = group_spec
+    )
+    row$n_observations <- nrow(data)
+    row$n_nonzero_observations <- sum(data$rna_count > 0)
+
+    if (nrow(data) == 0L) {
+        row$status <- "skipped"
+        row$error_message <- paste0("No observations were available for the ", feature_label, ".")
+        return(list(result = row, model = NULL))
+    }
+
+    if (length(unique(as.character(data$genome_id))) < 2L) {
+        row$status <- "skipped"
+        row$error_message <- "At least two genomes are required to estimate the random effect."
+        return(list(result = row, model = NULL))
+    }
+
+    if (length(unique(as.character(data$genome_group))) < 2L) {
+        row$status <- "skipped"
+        row$error_message <- "At least two genome groups are required to estimate the interaction."
+        return(list(result = row, model = NULL))
+    }
+
+    if (all(data$rna_count == 0)) {
+        row$status <- "skipped"
+        row$error_message <- paste0("All ", feature_label, "-level counts were zero.")
+        return(list(result = row, model = NULL))
+    }
+
+    data$genome_id <- factor(as.character(data$genome_id))
+    data$genome_group <- factor(as.character(data$genome_group), levels = group_spec$levels)
+
+    warning_messages <- character()
+    formula <- .feature_group_interaction_formula(
+        model_spec = model_spec,
+        specification = model
+    )
+    fit <- tryCatch(
+        withCallingHandlers(
+            glmmTMB::glmmTMB(
+                formula = formula,
+                data = data,
+                family = glmmTMB::nbinom2(link = "log")
+            ),
+            warning = function(w) {
+                warning_messages <<- c(warning_messages, conditionMessage(w))
+                invokeRestart("muffleWarning")
+            }
+        ),
+        error = identity
+    )
+
+    if (inherits(fit, "error")) {
+        row$status <- "error"
+        row$error_message <- conditionMessage(fit)
+        row$warning_message <- if (length(warning_messages) > 0L) {
+            paste(unique(warning_messages), collapse = " | ")
+        } else {
+            NA_character_
+        }
+        return(list(result = row, model = NULL))
+    }
+
+    coefficient_table <- summary(fit)$coefficients$cond
+    interaction_term <- tryCatch(
+        .resolve_feature_group_interaction_term(
+            model_spec = model_spec,
+            coefficient_table = coefficient_table,
+            group_variable = "genome_group",
+            group_contrast_level = group_spec$contrastLevel
+        ),
+        error = identity
+    )
+
+    if (inherits(interaction_term, "error")) {
+        row$status <- "error"
+        row$error_message <- conditionMessage(interaction_term)
+        row$warning_message <- if (length(warning_messages) > 0L) {
+            paste(unique(warning_messages), collapse = " | ")
+        } else {
+            NA_character_
+        }
+        return(list(result = row, model = if (keep_fits) fit else NULL))
+    }
+
+    statistic_col <- intersect(colnames(coefficient_table), c("z value", "t value"))[1L]
+    p_value_col <- grep("^Pr\\(", colnames(coefficient_table), value = TRUE)[1L]
+    tested_row <- coefficient_table[interaction_term$interactionTerm, , drop = FALSE]
+    intercept_row <- coefficient_table["(Intercept)", , drop = FALSE]
+    row$base_tested_term <- interaction_term$baseTerm
+    row$tested_term <- interaction_term$interactionTerm
+    row$group_term <- interaction_term$groupTerm
+    row$estimate <- as.numeric(tested_row[, "Estimate"])
+    row$std_error <- as.numeric(tested_row[, "Std. Error"])
+    row$statistic <- as.numeric(tested_row[, statistic_col])
+    row$p_value <- as.numeric(tested_row[, p_value_col])
+    row$intercept_estimate <- as.numeric(intercept_row[, "Estimate"])
+    row$intercept_std_error <- as.numeric(intercept_row[, "Std. Error"])
+    row$AIC <- stats::AIC(fit)
+    row$BIC <- stats::BIC(fit)
+    row$logLik <- as.numeric(stats::logLik(fit))
+    row$pd_hess <- if (!is.null(fit$sdr$pdHess)) isTRUE(fit$sdr$pdHess) else NA
+    row$optimizer_convergence <- if (!is.null(fit$fit$convergence)) {
+        as.integer(fit$fit$convergence)
+    } else {
+        NA_integer_
+    }
+    row$warning_message <- if (length(warning_messages) > 0L) {
+        paste(unique(warning_messages), collapse = " | ")
+    } else {
+        NA_character_
+    }
+    row$error_message <- NA_character_
+    row$status <- "ok"
+
+    list(
+        result = row,
+        model = if (keep_fits) fit else NULL
+    )
+}
+
 .normalize_genome_model_lib_size <- function(x, response_counts, response_assay, libSize) {
     .normalize_lib_size_values(
         sample_data = SummarizedExperiment::colData(x),
@@ -562,7 +1386,7 @@
 .build_feature_mixed_model_observations <- function(
     aggregated,
     x,
-    variable,
+    model_spec,
     specification,
     lib_size,
     genome_assay,
@@ -575,8 +1399,6 @@
     pair_counts <- SummarizedExperiment::assay(aggregated, assay_name, withDimnames = TRUE)
     pair_data <- SummarizedExperiment::rowData(aggregated)
     sample_ids <- colnames(pair_counts)
-    variable_info <- .normalize_ko_model_variable(x, variable)
-    variable_values <- variable_info$values
 
     obs <- expand.grid(
         feature_genome_id = rownames(pair_counts),
@@ -593,12 +1415,15 @@
     obs$n_genes_pair <- as.integer(pair_data$n_genes_pair[matched_pairs])
     obs$n_links_pair <- as.integer(pair_data$n_links_pair[matched_pairs])
 
-    obs[[variable]] <- variable_values[obs$sample_id]
-    if (is.factor(variable_values)) {
-        obs[[variable]] <- factor(
-            obs[[variable]],
-            levels = levels(variable_values)
-        )
+    predictor_frame <- model_spec$sampleData[obs$sample_id, , drop = FALSE]
+    predictor_names <- names(predictor_frame)
+    for (column_name in predictor_names) {
+        values <- predictor_frame[[column_name]]
+        if (is.factor(values)) {
+            obs[[column_name]] <- factor(values, levels = levels(values))
+        } else {
+            obs[[column_name]] <- values
+        }
     }
 
     if (.specification_uses_library_offset(specification)) {
@@ -627,11 +1452,17 @@
 
     out <- S4Vectors::DataFrame(obs, check.names = FALSE)
     S4Vectors::metadata(out)$mttk_function_mixed_model <- list(
-        variable = variable,
-        variableType = variable_info$type,
-        referenceLevel = variable_info$referenceLevel,
-        contrastLevel = variable_info$contrastLevel,
-        effectLabel = variable_info$effectLabel,
+        variable = model_spec$variable,
+        variableType = model_spec$variableType,
+        referenceLevel = model_spec$referenceLevel,
+        contrastLevel = model_spec$contrastLevel,
+        effectLabel = model_spec$effectLabel,
+        fixedFormula = model_spec$fixedFormulaLabel,
+        availableTerms = model_spec$availableTerms,
+        testedTermInput = model_spec$testedTermInput,
+        testedTerm = model_spec$testedTerm,
+        testedVariable = model_spec$testedVariable,
+        randomSlopeVariable = model_spec$randomSlopeVariable,
         specification = specification,
         libraryOffset = .specification_uses_library_offset(specification),
         genomeOffset = .specification_uses_genome_offset(specification),
@@ -661,8 +1492,8 @@
     out
 }
 
-.feature_model_formula <- function(variable, specification) {
-    rhs <- c(paste0("`", variable, "`"))
+.compose_response_formula <- function(fixed_formula, specification, random_effect = NULL) {
+    rhs <- paste(deparse(fixed_formula[[2L]]), collapse = " ")
 
     if (.specification_uses_library_offset(specification)) {
         rhs <- c(rhs, "offset(log(lib_size))")
@@ -672,23 +1503,69 @@
         rhs <- c(rhs, "offset(log(genome_abundance_offset))")
     }
 
-    rhs <- c(rhs, "(1 | genome_id)")
+    if (!is.null(random_effect)) {
+        rhs <- c(rhs, random_effect)
+    }
+
     stats::as.formula(paste("rna_count ~", paste(rhs, collapse = " + ")))
 }
 
-.feature_random_slope_formula <- function(variable, specification) {
-    rhs <- c(paste0("`", variable, "`"))
+.feature_model_formula <- function(model_spec, specification) {
+    .compose_response_formula(
+        fixed_formula = model_spec$fixedFormula,
+        specification = specification,
+        random_effect = "(1 | genome_id)"
+    )
+}
 
-    if (.specification_uses_library_offset(specification)) {
-        rhs <- c(rhs, "offset(log(lib_size))")
+.feature_random_slope_formula <- function(model_spec, specification) {
+    random_slope_variable <- model_spec$randomSlopeVariable
+
+    if (is.na(random_slope_variable) || random_slope_variable == "") {
+        stop(
+            "A random-slope workflow requires a focal sample-level variable. Provide 'variable' or set 'randomSlope' when using 'formula'.",
+            call. = FALSE
+        )
     }
 
-    if (.specification_uses_genome_offset(specification)) {
-        rhs <- c(rhs, "offset(log(genome_abundance_offset))")
-    }
+    .compose_response_formula(
+        fixed_formula = model_spec$fixedFormula,
+        specification = specification,
+        random_effect = paste0("(1 + `", random_slope_variable, "` | genome_id)")
+    )
+}
 
-    rhs <- c(rhs, paste0("(1 + `", variable, "` | genome_id)"))
-    stats::as.formula(paste("rna_count ~", paste(rhs, collapse = " + ")))
+.gene_model_formula <- function(model_spec, specification) {
+    .compose_response_formula(
+        fixed_formula = model_spec$fixedFormula,
+        specification = specification
+    )
+}
+
+.resolve_fitted_tested_term <- function(model_spec, coefficient_table) {
+    tested_terms <- setdiff(rownames(coefficient_table), "(Intercept)")
+
+    .resolve_requested_model_term(
+        term = if (!is.null(model_spec$testedTerm) && !is.na(model_spec$testedTerm)) {
+            model_spec$testedTerm
+        } else {
+            model_spec$testedTermInput
+        },
+        candidates = tested_terms,
+        strict = TRUE,
+        term_label = "term"
+    )
+}
+
+.resolved_term_info <- function(model_spec, tested_term) {
+    .describe_tested_term(
+        sample_data = model_spec$sampleData,
+        tested_term = tested_term,
+        tested_variable = .infer_tested_variable(
+            sample_data = model_spec$sampleData,
+            tested_term = tested_term
+        )
+    )
 }
 
 .match_model_term_name <- function(term, candidates) {
@@ -702,11 +1579,61 @@
     }
 
     matched <- candidates[strip_ticks(candidates) == strip_ticks(term)]
-    if (length(matched) == 0L) {
+    if (length(matched) == 1L) {
+        return(matched[[1L]])
+    }
+
+    prefix_matches <- candidates[startsWith(strip_ticks(candidates), strip_ticks(term))]
+    if (length(prefix_matches) == 1L) {
+        return(prefix_matches[[1L]])
+    }
+
+    NA_character_
+}
+
+.resolve_requested_model_term <- function(term, candidates, strict = FALSE, term_label = "term") {
+    candidates <- as.character(candidates)
+
+    if (length(candidates) == 0L) {
+        if (isTRUE(strict)) {
+            stop("The fixed-effect formula does not define any tested terms.", call. = FALSE)
+        }
+
         return(NA_character_)
     }
 
-    matched[[1L]]
+    if (is.null(term) || is.na(term) || term == "") {
+        if (length(candidates) == 1L) {
+            return(candidates[[1L]])
+        }
+
+        if (isTRUE(strict)) {
+            stop(
+                "The fixed-effect formula produces multiple tested terms. Supply '",
+                term_label,
+                "' to select one of: ",
+                paste(candidates, collapse = ", "),
+                ".",
+                call. = FALSE
+            )
+        }
+
+        return(NA_character_)
+    }
+
+    matched <- .match_model_term_name(term, candidates)
+    if (is.na(matched) && isTRUE(strict)) {
+        stop(
+            "Could not match the requested '",
+            term_label,
+            "' to the available model terms. Available terms: ",
+            paste(candidates, collapse = ", "),
+            ".",
+            call. = FALSE
+        )
+    }
+
+    matched
 }
 
 .extract_glmmtmb_group_variance <- function(fit, group_name, tested_term) {
@@ -971,13 +1898,18 @@
     data,
     feature_id,
     feature_summary,
-    variable_info,
+    model_spec,
     model,
     keep_fits,
     feature_id_column,
     feature_label
 ) {
-    variable <- variable_info$name
+    variable_info <- list(
+        type = model_spec$variableType,
+        referenceLevel = model_spec$referenceLevel,
+        contrastLevel = model_spec$contrastLevel,
+        effectLabel = model_spec$effectLabel
+    )
     row <- .empty_feature_mixed_model_row(
         feature_id = feature_id,
         feature_summary = feature_summary,
@@ -1004,14 +1936,10 @@
         row$error_message <- paste0("All ", feature_label, "-level counts were zero.")
         return(list(result = row, model = NULL))
     }
-
     data$genome_id <- factor(as.character(data$genome_id))
-    if (is.factor(data[[variable]])) {
-        data[[variable]] <- droplevels(data[[variable]])
-    }
 
     warning_messages <- character()
-    formula <- .feature_model_formula(variable = variable, specification = model)
+    formula <- .feature_model_formula(model_spec = model_spec, specification = model)
     fit <- tryCatch(
         withCallingHandlers(
             glmmTMB::glmmTMB(
@@ -1039,15 +1967,14 @@
     }
 
     coefficient_table <- summary(fit)$coefficients$cond
-    tested_terms <- setdiff(rownames(coefficient_table), "(Intercept)")
+    tested_term <- tryCatch(
+        .resolve_fitted_tested_term(model_spec, coefficient_table),
+        error = identity
+    )
 
-    if (length(tested_terms) != 1L) {
+    if (inherits(tested_term, "error")) {
         row$status <- "error"
-        row$error_message <- paste0(
-            "Expected exactly one tested fixed-effect term, found ",
-            length(tested_terms),
-            "."
-        )
+        row$error_message <- conditionMessage(tested_term)
         row$warning_message <- if (length(warning_messages) > 0L) {
             paste(unique(warning_messages), collapse = " | ")
         } else {
@@ -1058,10 +1985,15 @@
 
     statistic_col <- intersect(colnames(coefficient_table), c("z value", "t value"))[1L]
     p_value_col <- grep("^Pr\\(", colnames(coefficient_table), value = TRUE)[1L]
-    tested_row <- coefficient_table[tested_terms, , drop = FALSE]
+    tested_row <- coefficient_table[tested_term, , drop = FALSE]
     intercept_row <- coefficient_table["(Intercept)", , drop = FALSE]
+    term_info <- .resolved_term_info(model_spec, tested_term = tested_term)
 
-    row$tested_term <- tested_terms
+    row$tested_term <- tested_term
+    row$variable_type <- term_info$type
+    row$reference_level <- term_info$referenceLevel
+    row$contrast_level <- term_info$contrastLevel
+    row$effect_label <- term_info$effectLabel
     row$estimate <- as.numeric(tested_row[, "Estimate"])
     row$std_error <- as.numeric(tested_row[, "Std. Error"])
     row$statistic <- as.numeric(tested_row[, statistic_col])
@@ -1114,13 +2046,18 @@
     data,
     feature_id,
     feature_summary,
-    variable_info,
+    model_spec,
     model,
     keep_fits,
     feature_id_column,
     feature_label
 ) {
-    variable <- variable_info$name
+    variable_info <- list(
+        type = model_spec$variableType,
+        referenceLevel = model_spec$referenceLevel,
+        contrastLevel = model_spec$contrastLevel,
+        effectLabel = model_spec$effectLabel
+    )
     row <- .empty_feature_random_slope_model_row(
         feature_id = feature_id,
         feature_summary = feature_summary,
@@ -1149,12 +2086,9 @@
     }
 
     data$genome_id <- factor(as.character(data$genome_id))
-    if (is.factor(data[[variable]])) {
-        data[[variable]] <- droplevels(data[[variable]])
-    }
 
     warning_messages <- character()
-    formula <- .feature_random_slope_formula(variable = variable, specification = model)
+    formula <- .feature_random_slope_formula(model_spec = model_spec, specification = model)
     fit <- tryCatch(
         withCallingHandlers(
             glmmTMB::glmmTMB(
@@ -1182,15 +2116,14 @@
     }
 
     coefficient_table <- summary(fit)$coefficients$cond
-    tested_terms <- setdiff(rownames(coefficient_table), "(Intercept)")
+    tested_term <- tryCatch(
+        .resolve_fitted_tested_term(model_spec, coefficient_table),
+        error = identity
+    )
 
-    if (length(tested_terms) != 1L) {
+    if (inherits(tested_term, "error")) {
         row$status <- "error"
-        row$error_message <- paste0(
-            "Expected exactly one tested fixed-effect term, found ",
-            length(tested_terms),
-            "."
-        )
+        row$error_message <- conditionMessage(tested_term)
         row$warning_message <- if (length(warning_messages) > 0L) {
             paste(unique(warning_messages), collapse = " | ")
         } else {
@@ -1205,25 +2138,30 @@
 
     statistic_col <- intersect(colnames(coefficient_table), c("z value", "t value"))[1L]
     p_value_col <- grep("^Pr\\(", colnames(coefficient_table), value = TRUE)[1L]
-    tested_row <- coefficient_table[tested_terms, , drop = FALSE]
+    tested_row <- coefficient_table[tested_term, , drop = FALSE]
     intercept_row <- coefficient_table["(Intercept)", , drop = FALSE]
     variance_summary <- .extract_glmmtmb_group_variance(
         fit = fit,
         group_name = "genome_id",
-        tested_term = tested_terms
+        tested_term = tested_term
     )
     group_effects <- .extract_glmmtmb_group_effects(
         fit = fit,
         feature_id = feature_id,
         feature_id_column = feature_id_column,
         group_name = "genome_id",
-        tested_term = tested_terms,
-        effect_label = variable_info$effectLabel,
+        tested_term = tested_term,
+        effect_label = .resolved_term_info(model_spec, tested_term)$effectLabel,
         fixed_intercept = as.numeric(intercept_row[, "Estimate"]),
         fixed_effect = as.numeric(tested_row[, "Estimate"])
     )
+    term_info <- .resolved_term_info(model_spec, tested_term = tested_term)
 
-    row$tested_term <- tested_terms
+    row$tested_term <- tested_term
+    row$variable_type <- term_info$type
+    row$reference_level <- term_info$referenceLevel
+    row$contrast_level <- term_info$contrastLevel
+    row$effect_label <- term_info$effectLabel
     row$estimate <- as.numeric(tested_row[, "Estimate"])
     row$std_error <- as.numeric(tested_row[, "Std. Error"])
     row$statistic <- as.numeric(tested_row[, statistic_col])
@@ -1260,6 +2198,8 @@
 .fit_feature_random_slope_model <- function(
     x,
     variable,
+    formula = NULL,
+    term = NULL,
     assay,
     libraryOffset,
     genomeOffset,
@@ -1267,6 +2207,8 @@
     libSize,
     genomeAssay,
     offsetPseudocount,
+    referenceLevels = NULL,
+    randomSlope = NULL,
     keepFits,
     path,
     feature_label,
@@ -1287,9 +2229,21 @@
         stop("'keepFits' must be TRUE or FALSE.", call. = FALSE)
     }
 
-    model_data <- .make_feature_mixed_model_data(
+    model_spec <- .normalize_model_spec(
         x = x,
         variable = variable,
+        formula = formula,
+        term = term,
+        referenceLevels = referenceLevels,
+        randomSlope = randomSlope,
+        allow_formula = TRUE,
+        allow_random_slope = TRUE
+    )
+    .require_model_spec_term(model_spec)
+
+    model_data <- .make_feature_mixed_model_data(
+        x = x,
+        model_spec = model_spec,
         assay = assay,
         libraryOffset = libraryOffset,
         genomeOffset = genomeOffset,
@@ -1308,13 +2262,6 @@
     feature_id_column <- model_state$featureIdColumn
     assay_name <- model_state$sourceAssay
     genome_assay <- model_state$genomeAssay
-    variable_info <- list(
-        name = variable,
-        type = model_state$variableType,
-        referenceLevel = model_state$referenceLevel,
-        contrastLevel = model_state$contrastLevel,
-        effectLabel = model_state$effectLabel
-    )
     feature_ids <- rownames(feature_summary)
 
     fitted_rows <- lapply(feature_ids, function(feature_id) {
@@ -1327,7 +2274,7 @@
             data = data_feature,
             feature_id = feature_id,
             feature_summary = feature_summary[feature_id, , drop = FALSE],
-            variable_info = variable_info,
+            model_spec = model_spec,
             model = specification,
             keep_fits = keepFits,
             feature_id_column = feature_id_column,
@@ -1362,17 +2309,21 @@
         group_effects <- S4Vectors::DataFrame()
     }
 
-    formula <- .feature_random_slope_formula(variable = variable, specification = specification)
+    formula <- .feature_random_slope_formula(model_spec = model_spec, specification = specification)
     info <- list(
         backend = "glmmTMB",
         model = fit_model_name,
         featureType = model_state$featureLabel,
         featureIdColumn = feature_id_column,
-        variable = variable,
+        variable = model_state$variable,
         variableType = model_state$variableType,
         referenceLevel = model_state$referenceLevel,
         contrastLevel = model_state$contrastLevel,
         effectLabel = model_state$effectLabel,
+        testedTermInput = model_state$testedTermInput,
+        testedTerm = model_state$testedTerm,
+        testedVariable = model_state$testedVariable,
+        fixedEffectsFormula = model_state$fixedFormula,
         specification = specification,
         libraryOffset = model_state$libraryOffset,
         genomeOffset = model_state$genomeOffset,
@@ -1386,6 +2337,7 @@
         formula = paste(deparse(formula), collapse = " "),
         randomEffects = "genome_random_intercept_and_slope",
         groupEffectColumn = "genome_id",
+        randomSlopeVariable = model_state$randomSlopeVariable,
         n_features = nrow(results),
         n_ok = sum(results$status == "ok"),
         n_skipped = sum(results$status == "skipped"),
@@ -1406,7 +2358,7 @@
 
 .make_feature_mixed_model_data <- function(
     x,
-    variable,
+    model_spec,
     assay,
     libraryOffset,
     genomeOffset,
@@ -1445,7 +2397,7 @@
     .build_feature_mixed_model_observations(
         aggregated = aggregated,
         x = x,
-        variable = variable,
+        model_spec = model_spec,
         specification = offset_state$specification,
         lib_size = offset_state$libSize,
         genome_assay = offset_state$genomeAssay,
@@ -1456,6 +2408,8 @@
 .fit_feature_mixed_model <- function(
     x,
     variable,
+    formula = NULL,
+    term = NULL,
     assay,
     libraryOffset,
     genomeOffset,
@@ -1463,6 +2417,7 @@
     libSize,
     genomeAssay,
     offsetPseudocount,
+    referenceLevels = NULL,
     keepFits,
     path,
     feature_label,
@@ -1483,9 +2438,20 @@
         stop("'keepFits' must be TRUE or FALSE.", call. = FALSE)
     }
 
-    model_data <- .make_feature_mixed_model_data(
+    model_spec <- .normalize_model_spec(
         x = x,
         variable = variable,
+        formula = formula,
+        term = term,
+        referenceLevels = referenceLevels,
+        allow_formula = TRUE,
+        allow_random_slope = FALSE
+    )
+    .require_model_spec_term(model_spec)
+
+    model_data <- .make_feature_mixed_model_data(
+        x = x,
+        model_spec = model_spec,
         assay = assay,
         libraryOffset = libraryOffset,
         genomeOffset = genomeOffset,
@@ -1504,13 +2470,6 @@
     feature_id_column <- model_state$featureIdColumn
     assay_name <- model_state$sourceAssay
     genome_assay <- model_state$genomeAssay
-    variable_info <- list(
-        name = variable,
-        type = model_state$variableType,
-        referenceLevel = model_state$referenceLevel,
-        contrastLevel = model_state$contrastLevel,
-        effectLabel = model_state$effectLabel
-    )
     feature_ids <- rownames(feature_summary)
 
     fitted_rows <- lapply(feature_ids, function(feature_id) {
@@ -1523,7 +2482,7 @@
             data = data_feature,
             feature_id = feature_id,
             feature_summary = feature_summary[feature_id, , drop = FALSE],
-            variable_info = variable_info,
+            model_spec = model_spec,
             model = specification,
             keep_fits = keepFits,
             feature_id_column = feature_id_column,
@@ -1550,17 +2509,21 @@
         list()
     }
 
-    formula <- .feature_model_formula(variable = variable, specification = specification)
+    formula <- .feature_model_formula(model_spec = model_spec, specification = specification)
     info <- list(
         backend = "glmmTMB",
         model = fit_model_name,
         featureType = model_state$featureLabel,
         featureIdColumn = feature_id_column,
-        variable = variable,
+        variable = model_state$variable,
         variableType = model_state$variableType,
         referenceLevel = model_state$referenceLevel,
         contrastLevel = model_state$contrastLevel,
         effectLabel = model_state$effectLabel,
+        testedTermInput = model_state$testedTermInput,
+        testedTerm = model_state$testedTerm,
+        testedVariable = model_state$testedVariable,
+        fixedEffectsFormula = model_state$fixedFormula,
         specification = specification,
         libraryOffset = model_state$libraryOffset,
         genomeOffset = model_state$genomeOffset,
@@ -1572,6 +2535,179 @@
         offsetPseudocount = model_state$offsetPseudocount,
         family = "nbinom2",
         formula = paste(deparse(formula), collapse = " "),
+        n_features = nrow(results),
+        n_ok = sum(results$status == "ok"),
+        n_skipped = sum(results$status == "skipped"),
+        n_error = sum(results$status == "error")
+    )
+
+    MTTKFit(
+        results = results,
+        info = info,
+        models = stored_models
+    )
+}
+
+.fit_feature_group_interaction_model <- function(
+    x,
+    variable,
+    formula = NULL,
+    term = NULL,
+    group,
+    groupLevels = NULL,
+    assay,
+    libraryOffset,
+    genomeOffset,
+    membershipMode,
+    libSize,
+    genomeAssay,
+    offsetPseudocount,
+    referenceLevels = NULL,
+    keepFits,
+    path,
+    feature_label,
+    fit_model_name
+) {
+    if (!methods::is(x, "MTTKExperiment")) {
+        stop("'x' must be an MTTKExperiment.", call. = FALSE)
+    }
+
+    if (!requireNamespace("glmmTMB", quietly = TRUE)) {
+        stop(
+            "The 'glmmTMB' package must be installed to use mixed-model workflows in MTTK.",
+            call. = FALSE
+        )
+    }
+
+    if (!is.logical(keepFits) || length(keepFits) != 1L || is.na(keepFits)) {
+        stop("'keepFits' must be TRUE or FALSE.", call. = FALSE)
+    }
+
+    model_spec <- .normalize_model_spec(
+        x = x,
+        variable = variable,
+        formula = formula,
+        term = term,
+        referenceLevels = referenceLevels,
+        allow_formula = TRUE,
+        allow_random_slope = FALSE
+    )
+    .require_group_interaction_model_spec(model_spec)
+
+    model_data <- .make_feature_mixed_model_data(
+        x = x,
+        model_spec = model_spec,
+        assay = assay,
+        libraryOffset = libraryOffset,
+        genomeOffset = genomeOffset,
+        membershipMode = membershipMode,
+        libSize = libSize,
+        genomeAssay = genomeAssay,
+        offsetPseudocount = offsetPseudocount,
+        path = path,
+        feature_label = feature_label
+    )
+    model_data <- .build_feature_group_interaction_data(
+        model_data = model_data,
+        object = x,
+        group = group,
+        groupLevels = groupLevels
+    )
+
+    observations <- as.data.frame(model_data)
+    model_state <- S4Vectors::metadata(model_data)$mttk_function_group_interaction
+    specification <- model_state$specification
+    feature_summary <- model_state$featureSummary
+    feature_id_column <- model_state$featureIdColumn
+    assay_name <- model_state$sourceAssay
+    genome_assay <- model_state$genomeAssay
+    feature_ids <- rownames(feature_summary)
+    group_spec <- list(
+        groupColumn = model_state$groupColumn,
+        referenceLevel = model_state$groupReferenceLevel,
+        contrastLevel = model_state$groupContrastLevel,
+        levels = model_state$groupLevels
+    )
+
+    fitted_rows <- lapply(feature_ids, function(feature_id) {
+        data_feature <- observations[
+            as.character(observations[[feature_id_column]]) == feature_id,
+            ,
+            drop = FALSE
+        ]
+        .fit_one_feature_group_interaction_model(
+            data = data_feature,
+            feature_id = feature_id,
+            feature_summary = feature_summary[feature_id, , drop = FALSE],
+            model_spec = model_spec,
+            model = specification,
+            keep_fits = keepFits,
+            feature_id_column = feature_id_column,
+            feature_label = model_state$featureLabel,
+            group_spec = group_spec
+        )
+    })
+
+    results <- do.call(
+        rbind,
+        lapply(fitted_rows, function(one_fit) one_fit$result)
+    )
+    rownames(results) <- feature_ids
+
+    ok_rows <- !is.na(results$p_value) & results$status == "ok"
+    results$q_value <- NA_real_
+    results$q_value[ok_rows] <- stats::p.adjust(results$p_value[ok_rows], method = "BH")
+
+    stored_models <- if (keepFits) {
+        stats::setNames(
+            lapply(fitted_rows, function(one_fit) one_fit$model),
+            feature_ids
+        )
+    } else {
+        list()
+    }
+
+    resolved_terms <- unique(stats::na.omit(as.character(results$tested_term)))
+
+    formula <- .feature_group_interaction_formula(
+        model_spec = model_spec,
+        specification = specification
+    )
+    info <- list(
+        backend = "glmmTMB",
+        model = fit_model_name,
+        featureType = model_state$featureLabel,
+        featureIdColumn = feature_id_column,
+        variable = model_state$variable,
+        variableType = paste0(model_state$variableType, "_group_interaction"),
+        referenceLevel = model_state$referenceLevel,
+        contrastLevel = model_state$contrastLevel,
+        effectLabel = .group_interaction_effect_label(
+            base_effect_label = model_state$effectLabel,
+            group_spec = group_spec
+        ),
+        testedTermInput = model_state$testedTermInput,
+        testedTerm = if (length(resolved_terms) == 1L) resolved_terms[[1L]] else NA_character_,
+        testedBaseTerm = model_state$testedTerm,
+        testedVariable = model_state$testedVariable,
+        fixedEffectsFormula = model_state$fixedFormula,
+        specification = specification,
+        libraryOffset = model_state$libraryOffset,
+        genomeOffset = model_state$genomeOffset,
+        responseAssay = assay_name,
+        aggregationPath = model_state$path,
+        membershipMode = model_state$membershipMode,
+        libSizeSource = model_state$libSizeSource,
+        genomeAssay = genome_assay,
+        offsetPseudocount = model_state$offsetPseudocount,
+        family = "nbinom2",
+        formula = paste(deparse(formula), collapse = " "),
+        groupColumn = model_state$groupColumn,
+        groupReferenceLevel = model_state$groupReferenceLevel,
+        groupContrastLevel = model_state$groupContrastLevel,
+        groupLevels = model_state$groupLevels,
+        interactionVariable = model_state$testedVariable,
+        randomEffects = "genome_random_intercept",
         n_features = nrow(results),
         n_ok = sum(results$status == "ok"),
         n_skipped = sum(results$status == "skipped"),
@@ -1694,7 +2830,7 @@
 .build_ko_model_observations <- function(
     aggregated,
     x,
-    variable,
+    model_spec,
     specification,
     lib_size,
     genome_assay,
@@ -1703,7 +2839,7 @@
     .build_feature_mixed_model_observations(
         aggregated = aggregated,
         x = x,
-        variable = variable,
+        model_spec = model_spec,
         specification = specification,
         lib_size = lib_size,
         genome_assay = genome_assay,
@@ -1711,8 +2847,8 @@
     )
 }
 
-.ko_model_formula <- function(variable, specification) {
-    .feature_model_formula(variable = variable, specification = specification)
+.ko_model_formula <- function(model_spec, specification) {
+    .feature_model_formula(model_spec = model_spec, specification = specification)
 }
 
 .empty_ko_model_row <- function(ko_id, ko_summary, variable_info) {
@@ -1725,11 +2861,19 @@
 }
 
 .fit_one_ko_mixed_model <- function(data, ko_id, ko_summary, variable_info, model, keep_fits) {
+    model_spec <- variable_info$modelSpec
+    if (is.null(model_spec)) {
+        stop(
+            "Internal error: 'variable_info' must contain a 'modelSpec' entry.",
+            call. = FALSE
+        )
+    }
+
     .fit_one_feature_mixed_model(
         data = data,
         feature_id = ko_id,
         feature_summary = ko_summary,
-        variable_info = variable_info,
+        model_spec = model_spec,
         model = model,
         keep_fits = keep_fits,
         feature_id_column = "ko_id",
@@ -1784,8 +2928,16 @@ aggregateToKOGenome <- function(x, assay = "rna_gene_counts") {
 #' or for reusing the same KO/genome aggregation in custom workflows.
 #'
 #' @param x An `MTTKExperiment`.
-#' @param variable A single sample-level column name from `colData(x)`. The
-#'   column must be numeric or a factor with exactly two levels.
+#' @param variable A single sample-level column name from `colData(x)` for the
+#'   simple one-variable interface. The column must be numeric or a factor with
+#'   exactly two levels. Supply exactly one of `variable` or `formula`.
+#' @param formula Optional one-sided or two-sided fixed-effect formula for the
+#'   sample-level covariates, for example `~ condition + pH` or
+#'   `rna_count ~ condition + pH`. Offsets and genome-level random effects are
+#'   added internally by MTTK. Supply exactly one of `variable` or `formula`.
+#' @param term Optional fixed-effect term to extract from a formula-based fit.
+#'   This is required when the fixed-effect formula defines more than one tested
+#'   term.
 #' @param assay Gene-level assay name used as the RNA response.
 #' @param libraryOffset Logical; if `TRUE`, include `offset(log(lib_size))`.
 #' @param libSize Library-size offset specification. Use `NULL` to compute
@@ -1798,6 +2950,8 @@ aggregateToKOGenome <- function(x, assay = "rna_gene_counts") {
 #' @param genomeAssay Genome-level assay used when `genomeOffset = TRUE`.
 #' @param offsetPseudocount Non-negative pseudocount added to genome abundance
 #'   before log-offset calculation.
+#' @param referenceLevels Optional named list or named character vector setting
+#'   the reference levels of factor-like sample covariates before model fitting.
 #'
 #' @return An `S4Vectors::DataFrame` with one row per KO/genome/sample
 #'   observation.
@@ -1810,21 +2964,34 @@ aggregateToKOGenome <- function(x, assay = "rna_gene_counts") {
 #' @export
 makeKOMixedModelData <- function(
     x,
-    variable,
+    variable = NULL,
+    formula = NULL,
+    term = NULL,
     assay = "rna_gene_counts",
     libraryOffset = TRUE,
     genomeOffset = NULL,
     libSize = NULL,
     genomeAssay = "dna_genome_counts",
-    offsetPseudocount = 1
+    offsetPseudocount = 1,
+    referenceLevels = NULL
 ) {
     if (!methods::is(x, "MTTKExperiment")) {
         stop("'x' must be an MTTKExperiment.", call. = FALSE)
     }
 
-    out <- .make_feature_mixed_model_data(
+    model_spec <- .normalize_model_spec(
         x = x,
         variable = variable,
+        formula = formula,
+        term = term,
+        referenceLevels = referenceLevels,
+        allow_formula = TRUE,
+        allow_random_slope = FALSE
+    )
+
+    out <- .make_feature_mixed_model_data(
+        x = x,
+        model_spec = model_spec,
         assay = assay,
         libraryOffset = libraryOffset,
         genomeOffset = genomeOffset,
@@ -1859,8 +3026,17 @@ makeKOMixedModelData <- function(
 #' term should be modeled explicitly as a random intercept.
 #'
 #' @param x An `MTTKExperiment`.
-#' @param variable A single sample-level column name from `colData(x)`. The
-#'   column must be numeric or a factor with exactly two levels.
+#' @param variable A single sample-level column name from `colData(x)` for the
+#'   simple one-variable interface. The column must be numeric or a factor with
+#'   exactly two levels. Supply exactly one of `variable` or `formula`.
+#' @param formula Optional one-sided or two-sided fixed-effect formula for the
+#'   sample-level covariates, for example `~ condition + salinity` or
+#'   `rna_count ~ condition + salinity`. Offsets and genome-level random
+#'   effects are added internally by MTTK. Supply exactly one of `variable` or
+#'   `formula`.
+#' @param term Optional fixed-effect term to extract from a formula-based fit.
+#'   This is required when the fixed-effect formula defines more than one tested
+#'   term.
 #' @param assay Gene-level assay name used as the RNA response.
 #' @param libraryOffset Logical; if `TRUE`, include `offset(log(lib_size))`.
 #' @param libSize Library-size offset specification. Use `NULL` to compute
@@ -1873,6 +3049,8 @@ makeKOMixedModelData <- function(
 #' @param genomeAssay Genome-level assay used when `genomeOffset = TRUE`.
 #' @param offsetPseudocount Non-negative pseudocount added to genome abundance
 #'   before log-offset calculation.
+#' @param referenceLevels Optional named list or named character vector setting
+#'   the reference levels of factor-like sample covariates before model fitting.
 #' @param keepFits Logical; if `TRUE`, store the backend `glmmTMB` model objects
 #'   in the returned `MTTKFit`.
 #'
@@ -1889,18 +3067,23 @@ makeKOMixedModelData <- function(
 #' @export
 fitKOMixedModel <- function(
     x,
-    variable,
+    variable = NULL,
+    formula = NULL,
+    term = NULL,
     assay = "rna_gene_counts",
     libraryOffset = TRUE,
     genomeOffset = NULL,
     libSize = NULL,
     genomeAssay = "dna_genome_counts",
     offsetPseudocount = 1,
+    referenceLevels = NULL,
     keepFits = FALSE
 ) {
     .fit_feature_mixed_model(
         x = x,
         variable = variable,
+        formula = formula,
+        term = term,
         assay = assay,
         libraryOffset = libraryOffset,
         genomeOffset = genomeOffset,
@@ -1908,10 +3091,82 @@ fitKOMixedModel <- function(
         libSize = libSize,
         genomeAssay = genomeAssay,
         offsetPseudocount = offsetPseudocount,
+        referenceLevels = referenceLevels,
         keepFits = keepFits,
         path = "gene_to_ko",
         feature_label = "KO",
         fit_model_name = "ko_mixed_model"
+    )
+}
+
+#' Fit a KO-Level Genome-Group Interaction Model
+#'
+#' `fitKOGroupInteractionModel()` fits one negative-binomial mixed model per KO
+#' using `glmmTMB`, with a genome random intercept and a fixed interaction
+#' between the selected sample-level effect and a two-level genome grouping
+#' variable from `genomeData(x)`.
+#'
+#' RNA counts are first aggregated to KO-within-genome observations. The fitted
+#' interaction term answers the direct question: does the KO response differ
+#' between two genome groups, such as domains or selected clades, after
+#' adjusting for the chosen sample-level covariates and offsets?
+#'
+#' @inheritParams fitKOMixedModel
+#' @param group A single column name from `genomeData(x)` defining the genome
+#'   groups to compare.
+#' @param groupLevels Optional character vector of length 2 giving the genome
+#'   group reference and contrast levels. If `NULL`, the grouping column must
+#'   contain exactly two usable groups.
+#'
+#' @return An `MTTKFit` with one row per KO.
+#'
+#' @examples
+#' if (requireNamespace("glmmTMB", quietly = TRUE)) {
+#'     x <- makeShowcaseMTTKExperiment()
+#'     fit <- fitKOGroupInteractionModel(
+#'         x,
+#'         variable = "condition",
+#'         group = "domain"
+#'     )
+#'     fit
+#' }
+#'
+#' @export
+fitKOGroupInteractionModel <- function(
+    x,
+    variable = NULL,
+    formula = NULL,
+    term = NULL,
+    group,
+    groupLevels = NULL,
+    assay = "rna_gene_counts",
+    libraryOffset = TRUE,
+    genomeOffset = NULL,
+    libSize = NULL,
+    genomeAssay = "dna_genome_counts",
+    offsetPseudocount = 1,
+    referenceLevels = NULL,
+    keepFits = FALSE
+) {
+    .fit_feature_group_interaction_model(
+        x = x,
+        variable = variable,
+        formula = formula,
+        term = term,
+        group = group,
+        groupLevels = groupLevels,
+        assay = assay,
+        libraryOffset = libraryOffset,
+        genomeOffset = genomeOffset,
+        membershipMode = "duplicate",
+        libSize = libSize,
+        genomeAssay = genomeAssay,
+        offsetPseudocount = offsetPseudocount,
+        referenceLevels = referenceLevels,
+        keepFits = keepFits,
+        path = "gene_to_ko",
+        feature_label = "KO",
+        fit_model_name = "ko_group_interaction_model"
     )
 }
 
@@ -1934,6 +3189,9 @@ fitKOMixedModel <- function(
 #' Genome-specific KO coefficients can be extracted with [koGenomeEffects()].
 #'
 #' @inheritParams fitKOMixedModel
+#' @param randomSlope Optional sample-level variable whose genome-specific slope
+#'   should be modeled when `formula` is used. If omitted, MTTK uses the tested
+#'   variable when it can be inferred unambiguously.
 #'
 #' @return An `MTTKFit` with one row per KO. The returned fit also stores
 #'   KO-by-genome conditional effects that can be extracted with
@@ -1950,18 +3208,24 @@ fitKOMixedModel <- function(
 #' @export
 fitKORandomSlopeModel <- function(
     x,
-    variable,
+    variable = NULL,
+    formula = NULL,
+    term = NULL,
     assay = "rna_gene_counts",
     libraryOffset = TRUE,
     genomeOffset = NULL,
     libSize = NULL,
     genomeAssay = "dna_genome_counts",
     offsetPseudocount = 1,
+    referenceLevels = NULL,
+    randomSlope = NULL,
     keepFits = FALSE
 ) {
     .fit_feature_random_slope_model(
         x = x,
         variable = variable,
+        formula = formula,
+        term = term,
         assay = assay,
         libraryOffset = libraryOffset,
         genomeOffset = genomeOffset,
@@ -1969,6 +3233,8 @@ fitKORandomSlopeModel <- function(
         libSize = libSize,
         genomeAssay = genomeAssay,
         offsetPseudocount = offsetPseudocount,
+        referenceLevels = referenceLevels,
+        randomSlope = randomSlope,
         keepFits = keepFits,
         path = "gene_to_ko",
         feature_label = "KO",
@@ -2050,19 +3316,31 @@ aggregateToModuleGenome <- function(
 #' @export
 makeModuleMixedModelData <- function(
     x,
-    variable,
+    variable = NULL,
+    formula = NULL,
+    term = NULL,
     assay = "rna_gene_counts",
     libraryOffset = TRUE,
     genomeOffset = NULL,
     membershipMode = c("duplicate", "exclusive"),
     libSize = NULL,
     genomeAssay = "dna_genome_counts",
-    offsetPseudocount = 1
+    offsetPseudocount = 1,
+    referenceLevels = NULL
 ) {
     membershipMode <- match.arg(membershipMode)
-    .make_feature_mixed_model_data(
+    model_spec <- .normalize_model_spec(
         x = x,
         variable = variable,
+        formula = formula,
+        term = term,
+        referenceLevels = referenceLevels,
+        allow_formula = TRUE,
+        allow_random_slope = FALSE
+    )
+    .make_feature_mixed_model_data(
+        x = x,
+        model_spec = model_spec,
         assay = assay,
         libraryOffset = libraryOffset,
         genomeOffset = genomeOffset,
@@ -2115,7 +3393,9 @@ makeModuleMixedModelData <- function(
 #' @export
 fitModuleMixedModel <- function(
     x,
-    variable,
+    variable = NULL,
+    formula = NULL,
+    term = NULL,
     assay = "rna_gene_counts",
     libraryOffset = TRUE,
     genomeOffset = NULL,
@@ -2123,12 +3403,15 @@ fitModuleMixedModel <- function(
     libSize = NULL,
     genomeAssay = "dna_genome_counts",
     offsetPseudocount = 1,
+    referenceLevels = NULL,
     keepFits = FALSE
 ) {
     membershipMode <- match.arg(membershipMode)
     .fit_feature_mixed_model(
         x = x,
         variable = variable,
+        formula = formula,
+        term = term,
         assay = assay,
         libraryOffset = libraryOffset,
         genomeOffset = genomeOffset,
@@ -2136,10 +3419,84 @@ fitModuleMixedModel <- function(
         libSize = libSize,
         genomeAssay = genomeAssay,
         offsetPseudocount = offsetPseudocount,
+        referenceLevels = referenceLevels,
         keepFits = keepFits,
         path = c("gene_to_ko", "ko_to_module"),
         feature_label = "module",
         fit_model_name = "module_mixed_model"
+    )
+}
+
+#' Fit a Module-Level Genome-Group Interaction Model
+#'
+#' `fitModuleGroupInteractionModel()` fits one negative-binomial mixed model per
+#' module using `glmmTMB`, with a genome random intercept and a fixed
+#' interaction between the selected sample-level effect and a two-level genome
+#' grouping variable from `genomeData(x)`.
+#'
+#' This workflow is intended for the direct question: does the module response
+#' differ between two genome groups after accounting for genome nesting,
+#' optional genome abundance, and any covariates included in the fixed-effects
+#' formula?
+#'
+#' @inheritParams fitModuleMixedModel
+#' @param group A single column name from `genomeData(x)` defining the genome
+#'   groups to compare.
+#' @param groupLevels Optional character vector of length 2 giving the genome
+#'   group reference and contrast levels. If `NULL`, the grouping column must
+#'   contain exactly two usable groups.
+#'
+#' @return An `MTTKFit` with one row per module.
+#'
+#' @examples
+#' if (requireNamespace("glmmTMB", quietly = TRUE)) {
+#'     x <- makeShowcaseMTTKExperiment()
+#'     fit <- fitModuleGroupInteractionModel(
+#'         x,
+#'         variable = "condition",
+#'         group = "domain"
+#'     )
+#'     fit
+#' }
+#'
+#' @export
+fitModuleGroupInteractionModel <- function(
+    x,
+    variable = NULL,
+    formula = NULL,
+    term = NULL,
+    group,
+    groupLevels = NULL,
+    assay = "rna_gene_counts",
+    libraryOffset = TRUE,
+    genomeOffset = NULL,
+    membershipMode = c("duplicate", "exclusive"),
+    libSize = NULL,
+    genomeAssay = "dna_genome_counts",
+    offsetPseudocount = 1,
+    referenceLevels = NULL,
+    keepFits = FALSE
+) {
+    membershipMode <- match.arg(membershipMode)
+    .fit_feature_group_interaction_model(
+        x = x,
+        variable = variable,
+        formula = formula,
+        term = term,
+        group = group,
+        groupLevels = groupLevels,
+        assay = assay,
+        libraryOffset = libraryOffset,
+        genomeOffset = genomeOffset,
+        membershipMode = membershipMode,
+        libSize = libSize,
+        genomeAssay = genomeAssay,
+        offsetPseudocount = offsetPseudocount,
+        referenceLevels = referenceLevels,
+        keepFits = keepFits,
+        path = c("gene_to_ko", "ko_to_module"),
+        feature_label = "module",
+        fit_model_name = "module_group_interaction_model"
     )
 }
 
@@ -2169,6 +3526,10 @@ fitModuleMixedModel <- function(
 #' [moduleGenomeEffects()].
 #'
 #' @inheritParams fitModuleMixedModel
+#' @param randomSlope Optional sample-level variable whose genome-specific slope
+#'   should be estimated. When `variable` is supplied, MTTK uses that variable.
+#'   When `formula` is supplied, `randomSlope` can be omitted only if MTTK can
+#'   infer a single tested variable unambiguously.
 #'
 #' @return An `MTTKFit` with one row per module. The returned fit also stores
 #'   module-by-genome conditional effects that can be extracted with
@@ -2185,7 +3546,9 @@ fitModuleMixedModel <- function(
 #' @export
 fitModuleRandomSlopeModel <- function(
     x,
-    variable,
+    variable = NULL,
+    formula = NULL,
+    term = NULL,
     assay = "rna_gene_counts",
     libraryOffset = TRUE,
     genomeOffset = NULL,
@@ -2193,12 +3556,16 @@ fitModuleRandomSlopeModel <- function(
     libSize = NULL,
     genomeAssay = "dna_genome_counts",
     offsetPseudocount = 1,
+    referenceLevels = NULL,
+    randomSlope = NULL,
     keepFits = FALSE
 ) {
     membershipMode <- match.arg(membershipMode)
     .fit_feature_random_slope_model(
         x = x,
         variable = variable,
+        formula = formula,
+        term = term,
         assay = assay,
         libraryOffset = libraryOffset,
         genomeOffset = genomeOffset,
@@ -2206,6 +3573,8 @@ fitModuleRandomSlopeModel <- function(
         libSize = libSize,
         genomeAssay = genomeAssay,
         offsetPseudocount = offsetPseudocount,
+        referenceLevels = referenceLevels,
+        randomSlope = randomSlope,
         keepFits = keepFits,
         path = c("gene_to_ko", "ko_to_module"),
         feature_label = "module",
@@ -2287,19 +3656,31 @@ aggregateToPathwayGenome <- function(
 #' @export
 makePathwayMixedModelData <- function(
     x,
-    variable,
+    variable = NULL,
+    formula = NULL,
+    term = NULL,
     assay = "rna_gene_counts",
     libraryOffset = TRUE,
     genomeOffset = NULL,
     membershipMode = c("duplicate", "exclusive"),
     libSize = NULL,
     genomeAssay = "dna_genome_counts",
-    offsetPseudocount = 1
+    offsetPseudocount = 1,
+    referenceLevels = NULL
 ) {
     membershipMode <- match.arg(membershipMode)
-    .make_feature_mixed_model_data(
+    model_spec <- .normalize_model_spec(
         x = x,
         variable = variable,
+        formula = formula,
+        term = term,
+        referenceLevels = referenceLevels,
+        allow_formula = TRUE,
+        allow_random_slope = FALSE
+    )
+    .make_feature_mixed_model_data(
+        x = x,
+        model_spec = model_spec,
         assay = assay,
         libraryOffset = libraryOffset,
         genomeOffset = genomeOffset,
@@ -2352,7 +3733,9 @@ makePathwayMixedModelData <- function(
 #' @export
 fitPathwayMixedModel <- function(
     x,
-    variable,
+    variable = NULL,
+    formula = NULL,
+    term = NULL,
     assay = "rna_gene_counts",
     libraryOffset = TRUE,
     genomeOffset = NULL,
@@ -2360,12 +3743,15 @@ fitPathwayMixedModel <- function(
     libSize = NULL,
     genomeAssay = "dna_genome_counts",
     offsetPseudocount = 1,
+    referenceLevels = NULL,
     keepFits = FALSE
 ) {
     membershipMode <- match.arg(membershipMode)
     .fit_feature_mixed_model(
         x = x,
         variable = variable,
+        formula = formula,
+        term = term,
         assay = assay,
         libraryOffset = libraryOffset,
         genomeOffset = genomeOffset,
@@ -2373,10 +3759,84 @@ fitPathwayMixedModel <- function(
         libSize = libSize,
         genomeAssay = genomeAssay,
         offsetPseudocount = offsetPseudocount,
+        referenceLevels = referenceLevels,
         keepFits = keepFits,
         path = c("gene_to_ko", "ko_to_pathway"),
         feature_label = "pathway",
         fit_model_name = "pathway_mixed_model"
+    )
+}
+
+#' Fit a Pathway-Level Genome-Group Interaction Model
+#'
+#' `fitPathwayGroupInteractionModel()` fits one negative-binomial mixed model
+#' per pathway using `glmmTMB`, with a genome random intercept and a fixed
+#' interaction between the selected sample-level effect and a two-level genome
+#' grouping variable from `genomeData(x)`.
+#'
+#' This workflow is intended for the direct question: does the pathway response
+#' differ between two genome groups after accounting for genome nesting,
+#' optional genome abundance, and any covariates included in the fixed-effects
+#' formula?
+#'
+#' @inheritParams fitPathwayMixedModel
+#' @param group A single column name from `genomeData(x)` defining the genome
+#'   groups to compare.
+#' @param groupLevels Optional character vector of length 2 giving the genome
+#'   group reference and contrast levels. If `NULL`, the grouping column must
+#'   contain exactly two usable groups.
+#'
+#' @return An `MTTKFit` with one row per pathway.
+#'
+#' @examples
+#' if (requireNamespace("glmmTMB", quietly = TRUE)) {
+#'     x <- makeShowcaseMTTKExperiment()
+#'     fit <- fitPathwayGroupInteractionModel(
+#'         x,
+#'         variable = "condition",
+#'         group = "domain"
+#'     )
+#'     fit
+#' }
+#'
+#' @export
+fitPathwayGroupInteractionModel <- function(
+    x,
+    variable = NULL,
+    formula = NULL,
+    term = NULL,
+    group,
+    groupLevels = NULL,
+    assay = "rna_gene_counts",
+    libraryOffset = TRUE,
+    genomeOffset = NULL,
+    membershipMode = c("duplicate", "exclusive"),
+    libSize = NULL,
+    genomeAssay = "dna_genome_counts",
+    offsetPseudocount = 1,
+    referenceLevels = NULL,
+    keepFits = FALSE
+) {
+    membershipMode <- match.arg(membershipMode)
+    .fit_feature_group_interaction_model(
+        x = x,
+        variable = variable,
+        formula = formula,
+        term = term,
+        group = group,
+        groupLevels = groupLevels,
+        assay = assay,
+        libraryOffset = libraryOffset,
+        genomeOffset = genomeOffset,
+        membershipMode = membershipMode,
+        libSize = libSize,
+        genomeAssay = genomeAssay,
+        offsetPseudocount = offsetPseudocount,
+        referenceLevels = referenceLevels,
+        keepFits = keepFits,
+        path = c("gene_to_ko", "ko_to_pathway"),
+        feature_label = "pathway",
+        fit_model_name = "pathway_group_interaction_model"
     )
 }
 
@@ -2406,6 +3866,10 @@ fitPathwayMixedModel <- function(
 #' [pathwayGenomeEffects()].
 #'
 #' @inheritParams fitPathwayMixedModel
+#' @param randomSlope Optional sample-level variable whose genome-specific slope
+#'   should be estimated. When `variable` is supplied, MTTK uses that variable.
+#'   When `formula` is supplied, `randomSlope` can be omitted only if MTTK can
+#'   infer a single tested variable unambiguously.
 #'
 #' @return An `MTTKFit` with one row per pathway. The returned fit also stores
 #'   pathway-by-genome conditional effects that can be extracted with
@@ -2422,7 +3886,9 @@ fitPathwayMixedModel <- function(
 #' @export
 fitPathwayRandomSlopeModel <- function(
     x,
-    variable,
+    variable = NULL,
+    formula = NULL,
+    term = NULL,
     assay = "rna_gene_counts",
     libraryOffset = TRUE,
     genomeOffset = NULL,
@@ -2430,12 +3896,16 @@ fitPathwayRandomSlopeModel <- function(
     libSize = NULL,
     genomeAssay = "dna_genome_counts",
     offsetPseudocount = 1,
+    referenceLevels = NULL,
+    randomSlope = NULL,
     keepFits = FALSE
 ) {
     membershipMode <- match.arg(membershipMode)
     .fit_feature_random_slope_model(
         x = x,
         variable = variable,
+        formula = formula,
+        term = term,
         assay = assay,
         libraryOffset = libraryOffset,
         genomeOffset = genomeOffset,
@@ -2443,6 +3913,8 @@ fitPathwayRandomSlopeModel <- function(
         libSize = libSize,
         genomeAssay = genomeAssay,
         offsetPseudocount = offsetPseudocount,
+        referenceLevels = referenceLevels,
+        randomSlope = randomSlope,
         keepFits = keepFits,
         path = c("gene_to_ko", "ko_to_pathway"),
         feature_label = "pathway",
@@ -2506,7 +3978,7 @@ fitPathwayRandomSlopeModel <- function(
 
 .build_genome_model_observations <- function(
     x,
-    variable,
+    model_spec,
     specification,
     response_counts,
     genome_summary,
@@ -2519,8 +3991,6 @@ fitPathwayRandomSlopeModel <- function(
 ) {
     sample_ids <- colnames(response_counts)
     genome_ids <- rownames(response_counts)
-    variable_info <- .normalize_model_variable(x, variable)
-    variable_values <- variable_info$values
 
     if (!("genome_id" %in% names(genome_summary))) {
         genome_summary$genome_id <- genome_ids
@@ -2541,12 +4011,15 @@ fitPathwayRandomSlopeModel <- function(
         obs[[column_name]] <- S4Vectors::decode(genome_summary[[column_name]])[matched_genomes]
     }
 
-    obs[[variable]] <- variable_values[obs$sample_id]
-    if (is.factor(variable_values)) {
-        obs[[variable]] <- factor(
-            obs[[variable]],
-            levels = levels(variable_values)
-        )
+    predictor_frame <- model_spec$sampleData[obs$sample_id, , drop = FALSE]
+    predictor_names <- names(predictor_frame)
+    for (column_name in predictor_names) {
+        values <- predictor_frame[[column_name]]
+        if (is.factor(values)) {
+            obs[[column_name]] <- factor(values, levels = levels(values))
+        } else {
+            obs[[column_name]] <- values
+        }
     }
 
     if (.specification_uses_library_offset(specification)) {
@@ -2575,11 +4048,16 @@ fitPathwayRandomSlopeModel <- function(
 
     out <- S4Vectors::DataFrame(obs, check.names = FALSE)
     S4Vectors::metadata(out)$mttk_genome_model <- list(
-        variable = variable,
-        variableType = variable_info$type,
-        referenceLevel = variable_info$referenceLevel,
-        contrastLevel = variable_info$contrastLevel,
-        effectLabel = variable_info$effectLabel,
+        variable = model_spec$variable,
+        variableType = model_spec$variableType,
+        referenceLevel = model_spec$referenceLevel,
+        contrastLevel = model_spec$contrastLevel,
+        effectLabel = model_spec$effectLabel,
+        fixedFormula = model_spec$fixedFormulaLabel,
+        availableTerms = model_spec$availableTerms,
+        testedTermInput = model_spec$testedTermInput,
+        testedTerm = model_spec$testedTerm,
+        testedVariable = model_spec$testedVariable,
         specification = specification,
         libraryOffset = .specification_uses_library_offset(specification),
         genomeOffset = .specification_uses_genome_offset(specification),
@@ -2649,7 +4127,6 @@ fitPathwayRandomSlopeModel <- function(
 }
 
 .fit_one_genome_model <- function(data, genome_id, genome_summary, variable_info, specification, keep_fits) {
-    variable <- variable_info$name
     row <- .empty_genome_model_row(
         genome_id = genome_id,
         genome_summary = genome_summary,
@@ -2670,12 +4147,8 @@ fitPathwayRandomSlopeModel <- function(
         return(list(result = row, model = NULL))
     }
 
-    if (is.factor(data[[variable]])) {
-        data[[variable]] <- droplevels(data[[variable]])
-    }
-
     warning_messages <- character()
-    formula <- .gene_model_formula(variable = variable, specification = specification)
+    formula <- .gene_model_formula(model_spec = variable_info$modelSpec, specification = specification)
     fit <- tryCatch(
         withCallingHandlers(
             glmmTMB::glmmTMB(
@@ -2703,15 +4176,14 @@ fitPathwayRandomSlopeModel <- function(
     }
 
     coefficient_table <- summary(fit)$coefficients$cond
-    tested_terms <- setdiff(rownames(coefficient_table), "(Intercept)")
+    tested_term <- tryCatch(
+        .resolve_fitted_tested_term(variable_info$modelSpec, coefficient_table),
+        error = identity
+    )
 
-    if (length(tested_terms) != 1L) {
+    if (inherits(tested_term, "error")) {
         row$status <- "error"
-        row$error_message <- paste0(
-            "Expected exactly one tested fixed-effect term, found ",
-            length(tested_terms),
-            "."
-        )
+        row$error_message <- conditionMessage(tested_term)
         row$warning_message <- if (length(warning_messages) > 0L) {
             paste(unique(warning_messages), collapse = " | ")
         } else {
@@ -2722,10 +4194,15 @@ fitPathwayRandomSlopeModel <- function(
 
     statistic_col <- intersect(colnames(coefficient_table), c("z value", "t value"))[1L]
     p_value_col <- grep("^Pr\\(", colnames(coefficient_table), value = TRUE)[1L]
-    tested_row <- coefficient_table[tested_terms, , drop = FALSE]
+    tested_row <- coefficient_table[tested_term, , drop = FALSE]
     intercept_row <- coefficient_table["(Intercept)", , drop = FALSE]
+    term_info <- .resolved_term_info(variable_info$modelSpec, tested_term = tested_term)
 
-    row$tested_term <- tested_terms
+    row$tested_term <- tested_term
+    row$variable_type <- term_info$type
+    row$reference_level <- term_info$referenceLevel
+    row$contrast_level <- term_info$contrastLevel
+    row$effect_label <- term_info$effectLabel
     row$estimate <- as.numeric(tested_row[, "Estimate"])
     row$std_error <- as.numeric(tested_row[, "Std. Error"])
     row$statistic <- as.numeric(tested_row[, statistic_col])
@@ -2766,8 +4243,16 @@ fitPathwayRandomSlopeModel <- function(
 #' conditions or are associated with a continuous variable.
 #'
 #' @param x An `MTTKExperiment`.
-#' @param variable A single sample-level column name from `colData(x)`. The
-#'   column must be numeric or a factor with exactly two levels.
+#' @param variable A single sample-level column name from `colData(x)` for the
+#'   simple one-variable interface. The column must be numeric or a factor with
+#'   exactly two levels. Supply exactly one of `variable` or `formula`.
+#' @param formula Optional one-sided or two-sided fixed-effect formula for the
+#'   sample-level covariates, for example `~ condition + pH` or
+#'   `rna_count ~ condition + pH`. Offsets are added internally by MTTK.
+#'   Supply exactly one of `variable` or `formula`.
+#' @param term Optional fixed-effect term to extract from a formula-based fit.
+#'   This is required when the fixed-effect formula defines more than one tested
+#'   term.
 #' @param assay Genome-level or gene-level assay name used as the RNA response.
 #'   Use `NULL` to prefer `"rna_genome_counts"` when present and otherwise
 #'   aggregate `"rna_gene_counts"` to genomes.
@@ -2782,6 +4267,8 @@ fitPathwayRandomSlopeModel <- function(
 #' @param genomeAssay Genome-level assay used when `genomeOffset = TRUE`.
 #' @param offsetPseudocount Non-negative pseudocount added to genome abundance
 #'   before log-offset calculation.
+#' @param referenceLevels Optional named list or named character vector setting
+#'   the reference levels of factor-like sample covariates before model fitting.
 #'
 #' @return An `S4Vectors::DataFrame` with one row per genome/sample observation.
 #'
@@ -2793,17 +4280,30 @@ fitPathwayRandomSlopeModel <- function(
 #' @export
 makeGenomeModelData <- function(
     x,
-    variable,
+    variable = NULL,
+    formula = NULL,
+    term = NULL,
     assay = NULL,
     libraryOffset = TRUE,
     genomeOffset = NULL,
     libSize = NULL,
     genomeAssay = "dna_genome_counts",
-    offsetPseudocount = 1
+    offsetPseudocount = 1,
+    referenceLevels = NULL
 ) {
     if (!methods::is(x, "MTTKExperiment")) {
         stop("'x' must be an MTTKExperiment.", call. = FALSE)
     }
+
+    model_spec <- .normalize_model_spec(
+        x = x,
+        variable = variable,
+        formula = formula,
+        term = term,
+        referenceLevels = referenceLevels,
+        allow_formula = TRUE,
+        allow_random_slope = FALSE
+    )
 
     response_state <- .resolve_genome_model_response(x, assay = assay)
     offset_state <- .prepare_genome_offset_inputs(
@@ -2819,7 +4319,7 @@ makeGenomeModelData <- function(
 
     .build_genome_model_observations(
         x = x,
-        variable = variable,
+        model_spec = model_spec,
         specification = offset_state$specification,
         response_counts = response_state$counts,
         genome_summary = response_state$genomeSummary,
@@ -2862,13 +4362,16 @@ makeGenomeModelData <- function(
 #' @export
 fitGenomeModel <- function(
     x,
-    variable,
+    variable = NULL,
+    formula = NULL,
+    term = NULL,
     assay = NULL,
     libraryOffset = TRUE,
     genomeOffset = NULL,
     libSize = NULL,
     genomeAssay = "dna_genome_counts",
     offsetPseudocount = 1,
+    referenceLevels = NULL,
     keepFits = FALSE
 ) {
     if (!methods::is(x, "MTTKExperiment")) {
@@ -2886,15 +4389,29 @@ fitGenomeModel <- function(
         stop("'keepFits' must be TRUE or FALSE.", call. = FALSE)
     }
 
+    model_spec <- .normalize_model_spec(
+        x = x,
+        variable = variable,
+        formula = formula,
+        term = term,
+        referenceLevels = referenceLevels,
+        allow_formula = TRUE,
+        allow_random_slope = FALSE
+    )
+    .require_model_spec_term(model_spec)
+
     model_data <- makeGenomeModelData(
         x = x,
         variable = variable,
+        formula = formula,
+        term = term,
         assay = assay,
         libraryOffset = libraryOffset,
         genomeOffset = genomeOffset,
         libSize = libSize,
         genomeAssay = genomeAssay,
-        offsetPseudocount = offsetPseudocount
+        offsetPseudocount = offsetPseudocount,
+        referenceLevels = referenceLevels
     )
 
     observations <- as.data.frame(model_data)
@@ -2904,11 +4421,11 @@ fitGenomeModel <- function(
     response_assay <- model_state$responseAssay
     genome_assay <- model_state$genomeAssay
     variable_info <- list(
-        name = variable,
         type = model_state$variableType,
         referenceLevel = model_state$referenceLevel,
         contrastLevel = model_state$contrastLevel,
-        effectLabel = model_state$effectLabel
+        effectLabel = model_state$effectLabel,
+        modelSpec = model_spec
     )
     genome_ids <- rownames(genome_summary)
 
@@ -2943,17 +4460,24 @@ fitGenomeModel <- function(
         list()
     }
 
-    formula <- .gene_model_formula(variable = variable, specification = specification)
+    formula <- .gene_model_formula(
+        model_spec = variable_info$modelSpec,
+        specification = specification
+    )
     info <- list(
         backend = "glmmTMB",
         model = "genome_model",
         featureType = "genome",
         featureIdColumn = "genome_id",
-        variable = variable,
+        variable = model_state$variable,
         variableType = model_state$variableType,
         referenceLevel = model_state$referenceLevel,
         contrastLevel = model_state$contrastLevel,
         effectLabel = model_state$effectLabel,
+        testedTermInput = model_state$testedTermInput,
+        testedTerm = model_state$testedTerm,
+        testedVariable = model_state$testedVariable,
+        fixedEffectsFormula = model_state$fixedFormula,
         specification = specification,
         libraryOffset = model_state$libraryOffset,
         genomeOffset = model_state$genomeOffset,
@@ -2980,7 +4504,7 @@ fitGenomeModel <- function(
 
 .build_gene_model_observations <- function(
     x,
-    variable,
+    model_spec,
     specification,
     assay_name,
     lib_size,
@@ -2991,8 +4515,6 @@ fitGenomeModel <- function(
     row_data <- SummarizedExperiment::rowData(x)
     gene_ids <- rownames(counts)
     sample_ids <- colnames(counts)
-    variable_info <- .normalize_model_variable(x, variable)
-    variable_values <- variable_info$values
 
     gene_summary <- S4Vectors::DataFrame(
         gene_id = gene_ids,
@@ -3017,12 +4539,15 @@ fitGenomeModel <- function(
         obs$gene_name <- as.character(gene_summary$gene_name[matched_genes])
     }
 
-    obs[[variable]] <- variable_values[obs$sample_id]
-    if (is.factor(variable_values)) {
-        obs[[variable]] <- factor(
-            obs[[variable]],
-            levels = levels(variable_values)
-        )
+    predictor_frame <- model_spec$sampleData[obs$sample_id, , drop = FALSE]
+    predictor_names <- names(predictor_frame)
+    for (column_name in predictor_names) {
+        values <- predictor_frame[[column_name]]
+        if (is.factor(values)) {
+            obs[[column_name]] <- factor(values, levels = levels(values))
+        } else {
+            obs[[column_name]] <- values
+        }
     }
 
     if (.specification_uses_library_offset(specification)) {
@@ -3051,11 +4576,16 @@ fitGenomeModel <- function(
 
     out <- S4Vectors::DataFrame(obs, check.names = FALSE)
     S4Vectors::metadata(out)$mttk_gene_model <- list(
-        variable = variable,
-        variableType = variable_info$type,
-        referenceLevel = variable_info$referenceLevel,
-        contrastLevel = variable_info$contrastLevel,
-        effectLabel = variable_info$effectLabel,
+        variable = model_spec$variable,
+        variableType = model_spec$variableType,
+        referenceLevel = model_spec$referenceLevel,
+        contrastLevel = model_spec$contrastLevel,
+        effectLabel = model_spec$effectLabel,
+        fixedFormula = model_spec$fixedFormulaLabel,
+        availableTerms = model_spec$availableTerms,
+        testedTermInput = model_spec$testedTermInput,
+        testedTerm = model_spec$testedTerm,
+        testedVariable = model_spec$testedVariable,
         specification = specification,
         libraryOffset = .specification_uses_library_offset(specification),
         genomeOffset = .specification_uses_genome_offset(specification),
@@ -3079,20 +4609,6 @@ fitGenomeModel <- function(
     )
 
     out
-}
-
-.gene_model_formula <- function(variable, specification) {
-    rhs <- c(paste0("`", variable, "`"))
-
-    if (.specification_uses_library_offset(specification)) {
-        rhs <- c(rhs, "offset(log(lib_size))")
-    }
-
-    if (.specification_uses_genome_offset(specification)) {
-        rhs <- c(rhs, "offset(log(genome_abundance_offset))")
-    }
-
-    stats::as.formula(paste("rna_count ~", paste(rhs, collapse = " + ")))
 }
 
 .empty_gene_model_row <- function(gene_id, gene_summary, variable_info) {
@@ -3138,7 +4654,6 @@ fitGenomeModel <- function(
 }
 
 .fit_one_gene_model <- function(data, gene_id, gene_summary, variable_info, model, keep_fits) {
-    variable <- variable_info$name
     row <- .empty_gene_model_row(
         gene_id = gene_id,
         gene_summary = gene_summary,
@@ -3159,12 +4674,8 @@ fitGenomeModel <- function(
         return(list(result = row, model = NULL))
     }
 
-    if (is.factor(data[[variable]])) {
-        data[[variable]] <- droplevels(data[[variable]])
-    }
-
     warning_messages <- character()
-    formula <- .gene_model_formula(variable = variable, specification = model)
+    formula <- .gene_model_formula(model_spec = variable_info$modelSpec, specification = model)
     fit <- tryCatch(
         withCallingHandlers(
             glmmTMB::glmmTMB(
@@ -3192,15 +4703,14 @@ fitGenomeModel <- function(
     }
 
     coefficient_table <- summary(fit)$coefficients$cond
-    tested_terms <- setdiff(rownames(coefficient_table), "(Intercept)")
+    tested_term <- tryCatch(
+        .resolve_fitted_tested_term(variable_info$modelSpec, coefficient_table),
+        error = identity
+    )
 
-    if (length(tested_terms) != 1L) {
+    if (inherits(tested_term, "error")) {
         row$status <- "error"
-        row$error_message <- paste0(
-            "Expected exactly one tested fixed-effect term, found ",
-            length(tested_terms),
-            "."
-        )
+        row$error_message <- conditionMessage(tested_term)
         row$warning_message <- if (length(warning_messages) > 0L) {
             paste(unique(warning_messages), collapse = " | ")
         } else {
@@ -3211,10 +4721,15 @@ fitGenomeModel <- function(
 
     statistic_col <- intersect(colnames(coefficient_table), c("z value", "t value"))[1L]
     p_value_col <- grep("^Pr\\(", colnames(coefficient_table), value = TRUE)[1L]
-    tested_row <- coefficient_table[tested_terms, , drop = FALSE]
+    tested_row <- coefficient_table[tested_term, , drop = FALSE]
     intercept_row <- coefficient_table["(Intercept)", , drop = FALSE]
+    term_info <- .resolved_term_info(variable_info$modelSpec, tested_term = tested_term)
 
-    row$tested_term <- tested_terms
+    row$tested_term <- tested_term
+    row$variable_type <- term_info$type
+    row$reference_level <- term_info$referenceLevel
+    row$contrast_level <- term_info$contrastLevel
+    row$effect_label <- term_info$effectLabel
     row$estimate <- as.numeric(tested_row[, "Estimate"])
     row$std_error <- as.numeric(tested_row[, "Std. Error"])
     row$statistic <- as.numeric(tested_row[, statistic_col])
@@ -3256,8 +4771,16 @@ fitGenomeModel <- function(
 #' across samples rather than which functions are associated across genomes.
 #'
 #' @param x An `MTTKExperiment`.
-#' @param variable A single sample-level column name from `colData(x)`. The
-#'   column must be numeric or a factor with exactly two levels.
+#' @param variable A single sample-level column name from `colData(x)` for the
+#'   simple one-variable interface. The column must be numeric or a factor with
+#'   exactly two levels. Supply exactly one of `variable` or `formula`.
+#' @param formula Optional one-sided or two-sided fixed-effect formula for the
+#'   sample-level covariates, for example `~ condition + pH` or
+#'   `rna_count ~ condition + pH`. Offsets are added internally by MTTK.
+#'   Supply exactly one of `variable` or `formula`.
+#' @param term Optional fixed-effect term to extract from a formula-based fit.
+#'   This is required when the fixed-effect formula defines more than one tested
+#'   term.
 #' @param assay Gene-level assay name used as the RNA response.
 #' @param libraryOffset Logical; if `TRUE`, include `offset(log(lib_size))`.
 #' @param libSize Library-size offset specification. Use `NULL` to compute
@@ -3270,6 +4793,8 @@ fitGenomeModel <- function(
 #' @param genomeAssay Genome-level assay used when `genomeOffset = TRUE`.
 #' @param offsetPseudocount Non-negative pseudocount added to genome abundance
 #'   before log-offset calculation.
+#' @param referenceLevels Optional named list or named character vector setting
+#'   the reference levels of factor-like sample covariates before model fitting.
 #'
 #' @return An `S4Vectors::DataFrame` with one row per gene/sample observation.
 #'
@@ -3281,13 +4806,16 @@ fitGenomeModel <- function(
 #' @export
 makeGeneModelData <- function(
     x,
-    variable,
+    variable = NULL,
+    formula = NULL,
+    term = NULL,
     assay = "rna_gene_counts",
     libraryOffset = TRUE,
     genomeOffset = NULL,
     libSize = NULL,
     genomeAssay = "dna_genome_counts",
-    offsetPseudocount = 1
+    offsetPseudocount = 1,
+    referenceLevels = NULL
 ) {
     if (!methods::is(x, "MTTKExperiment")) {
         stop("'x' must be an MTTKExperiment.", call. = FALSE)
@@ -3297,6 +4825,16 @@ makeGeneModelData <- function(
     if (length(assay_name) != 1L) {
         stop("'assay' must be a single gene-level assay name.", call. = FALSE)
     }
+
+    model_spec <- .normalize_model_spec(
+        x = x,
+        variable = variable,
+        formula = formula,
+        term = term,
+        referenceLevels = referenceLevels,
+        allow_formula = TRUE,
+        allow_random_slope = FALSE
+    )
 
     offset_state <- .prepare_offset_inputs(
         x = x,
@@ -3309,7 +4847,7 @@ makeGeneModelData <- function(
 
     .build_gene_model_observations(
         x = x,
-        variable = variable,
+        model_spec = model_spec,
         specification = offset_state$specification,
         assay_name = assay_name,
         lib_size = offset_state$libSize,
@@ -3333,8 +4871,16 @@ makeGeneModelData <- function(
 #' permanently assigned to one genome.
 #'
 #' @param x An `MTTKExperiment`.
-#' @param variable A single sample-level column name from `colData(x)`. The
-#'   column must be numeric or a factor with exactly two levels.
+#' @param variable A single sample-level column name from `colData(x)` for the
+#'   simple one-variable interface. The column must be numeric or a factor with
+#'   exactly two levels. Supply exactly one of `variable` or `formula`.
+#' @param formula Optional one-sided or two-sided fixed-effect formula for the
+#'   sample-level covariates, for example `~ condition + pH` or
+#'   `rna_count ~ condition + pH`. Offsets are added internally by MTTK.
+#'   Supply exactly one of `variable` or `formula`.
+#' @param term Optional fixed-effect term to extract from a formula-based fit.
+#'   This is required when the fixed-effect formula defines more than one tested
+#'   term.
 #' @param assay Gene-level assay name used as the RNA response.
 #' @param libraryOffset Logical; if `TRUE`, include `offset(log(lib_size))`.
 #' @param libSize Library-size offset specification. Use `NULL` to compute
@@ -3347,6 +4893,8 @@ makeGeneModelData <- function(
 #' @param genomeAssay Genome-level assay used when `genomeOffset = TRUE`.
 #' @param offsetPseudocount Non-negative pseudocount added to genome abundance
 #'   before log-offset calculation.
+#' @param referenceLevels Optional named list or named character vector setting
+#'   the reference levels of factor-like sample covariates before model fitting.
 #' @param keepFits Logical; if `TRUE`, store the backend `glmmTMB` model objects
 #'   in the returned `MTTKFit`.
 #'
@@ -3363,13 +4911,16 @@ makeGeneModelData <- function(
 #' @export
 fitGeneModel <- function(
     x,
-    variable,
+    variable = NULL,
+    formula = NULL,
+    term = NULL,
     assay = "rna_gene_counts",
     libraryOffset = TRUE,
     genomeOffset = NULL,
     libSize = NULL,
     genomeAssay = "dna_genome_counts",
     offsetPseudocount = 1,
+    referenceLevels = NULL,
     keepFits = FALSE
 ) {
     if (!methods::is(x, "MTTKExperiment")) {
@@ -3387,15 +4938,29 @@ fitGeneModel <- function(
         stop("'keepFits' must be TRUE or FALSE.", call. = FALSE)
     }
 
+    model_spec <- .normalize_model_spec(
+        x = x,
+        variable = variable,
+        formula = formula,
+        term = term,
+        referenceLevels = referenceLevels,
+        allow_formula = TRUE,
+        allow_random_slope = FALSE
+    )
+    .require_model_spec_term(model_spec)
+
     model_data <- makeGeneModelData(
         x = x,
         variable = variable,
+        formula = formula,
+        term = term,
         assay = assay,
         libraryOffset = libraryOffset,
         genomeOffset = genomeOffset,
         libSize = libSize,
         genomeAssay = genomeAssay,
-        offsetPseudocount = offsetPseudocount
+        offsetPseudocount = offsetPseudocount,
+        referenceLevels = referenceLevels
     )
 
     observations <- as.data.frame(model_data)
@@ -3405,11 +4970,11 @@ fitGeneModel <- function(
     assay_name <- model_state$sourceAssay
     genome_assay <- model_state$genomeAssay
     variable_info <- list(
-        name = variable,
         type = model_state$variableType,
         referenceLevel = model_state$referenceLevel,
         contrastLevel = model_state$contrastLevel,
-        effectLabel = model_state$effectLabel
+        effectLabel = model_state$effectLabel,
+        modelSpec = model_spec
     )
     gene_ids <- rownames(gene_summary)
 
@@ -3444,15 +5009,22 @@ fitGeneModel <- function(
         list()
     }
 
-    formula <- .gene_model_formula(variable = variable, specification = specification)
+    formula <- .gene_model_formula(
+        model_spec = variable_info$modelSpec,
+        specification = specification
+    )
     info <- list(
         backend = "glmmTMB",
         model = "gene_model",
-        variable = variable,
+        variable = model_state$variable,
         variableType = model_state$variableType,
         referenceLevel = model_state$referenceLevel,
         contrastLevel = model_state$contrastLevel,
         effectLabel = model_state$effectLabel,
+        testedTermInput = model_state$testedTermInput,
+        testedTerm = model_state$testedTerm,
+        testedVariable = model_state$testedVariable,
+        fixedEffectsFormula = model_state$fixedFormula,
         specification = specification,
         libraryOffset = model_state$libraryOffset,
         genomeOffset = model_state$genomeOffset,

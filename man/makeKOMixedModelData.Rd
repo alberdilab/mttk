@@ -6,20 +6,33 @@
 \usage{
 makeKOMixedModelData(
   x,
-  variable,
+  variable = NULL,
+  formula = NULL,
+  term = NULL,
   assay = "rna_gene_counts",
   libraryOffset = TRUE,
   genomeOffset = NULL,
   libSize = NULL,
   genomeAssay = "dna_genome_counts",
-  offsetPseudocount = 1
+  offsetPseudocount = 1,
+  referenceLevels = NULL
 )
 }
 \arguments{
 \item{x}{An \code{MTTKExperiment}.}
 
-\item{variable}{A single sample-level column name from \code{colData(x)}. The
-column must be numeric or a factor with exactly two levels.}
+\item{variable}{A single sample-level column name from \code{colData(x)} for the
+simple one-variable interface. The column must be numeric or a factor with
+exactly two levels. Supply exactly one of \code{variable} or \code{formula}.}
+
+\item{formula}{Optional one-sided or two-sided fixed-effect formula for the
+sample-level covariates, for example \code{~ condition + pH} or
+\code{rna_count ~ condition + pH}. Offsets and genome-level random effects are
+added internally by MTTK. Supply exactly one of \code{variable} or \code{formula}.}
+
+\item{term}{Optional fixed-effect term to extract from a formula-based fit.
+This is required when the fixed-effect formula defines more than one tested
+term.}
 
 \item{assay}{Gene-level assay name used as the RNA response.}
 
@@ -38,6 +51,9 @@ numeric vector with one value per sample.}
 
 \item{offsetPseudocount}{Non-negative pseudocount added to genome abundance
 before log-offset calculation.}
+
+\item{referenceLevels}{Optional named list or named character vector setting
+the reference levels of factor-like sample covariates before model fitting.}
 }
 \value{
 An \code{S4Vectors::DataFrame} with one row per KO/genome/sample
