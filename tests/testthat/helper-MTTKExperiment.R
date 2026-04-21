@@ -54,6 +54,7 @@ make_test_mttk <- function(
     genomeAssays = NULL,
     genomeExperiment = NULL,
     genomeData = NULL,
+    genomeTree = NULL,
     links = NULL,
     activeHierarchies = NULL,
     metadata = list()
@@ -80,7 +81,7 @@ make_test_mttk <- function(
         activeHierarchies <- components$activeHierarchies
     }
 
-    MTTKExperiment(
+    x <- MTTKExperiment(
         assays = assays,
         rowData = components$rowData,
         colData = components$colData,
@@ -91,4 +92,10 @@ make_test_mttk <- function(
         activeHierarchies = activeHierarchies,
         metadata = metadata
     )
+
+    if (!is.null(genomeTree)) {
+        genomeTree(x) <- genomeTree
+    }
+
+    x
 }

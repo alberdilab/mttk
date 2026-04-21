@@ -9,6 +9,7 @@ not only a gene-by-sample count matrix.
 
 - genes are nested within genomes,
 - genome abundance may be measured separately from gene RNA counts,
+- genome relationships may be represented explicitly with a phylogenetic tree,
 - genes may also belong to functional hierarchies such as KO, module, and
   pathway.
 
@@ -113,10 +114,19 @@ different module/pathway workflows.
   conditional effects with `moduleGenomeEffects()` or
   `pathwayGenomeEffects()`.
 - If the question is "which genomes respond?", use `fitGenomeModel()`.
+- If the question is "do closely related genomes tend to respond similarly?",
+  fit genomes first and then use `fitGenomePhylogeneticSignal()`.
+- If the question is "is there a subtree of related genomes with a shifted
+  response?", fit genomes first and then use `scanGenomeClades()`.
 - If the question is "do genomes in a clade or taxonomic group respond
   coherently?", fit genomes first and then use
   `fitGenomeGroupMetaAnalysis(..., group = "domain")` or another grouping
   column from `genomeData(x)`.
+- If the question is "for a given KO, do genome-specific KO responses follow
+  the phylogeny?", fit KOs with random slopes first and then use
+  `fitKOPhylogeneticSignal()`.
+- If the question is "is there a subtree where a KO responds in a distinct
+  way?", fit KOs with random slopes first and then use `scanKOClades()`.
 - If the question is "which individual genes change?", use `fitGeneModel()`.
 
 In practice, the KO meta-analysis route is the main higher-hierarchy option for
@@ -166,6 +176,8 @@ The current version already supports:
 - module- and pathway-level KO meta-analysis built on KO effect sizes,
 - module- and pathway-level mixed models for total functional activity,
 - genome-level negative-binomial models,
+- tree-based summaries of genome-level responses,
+- tree-based summaries and clade scans for KO genome-specific responses,
 - genome-group meta-analysis across genome metadata columns such as domain or
   clade,
 - gene-level negative-binomial models with optional parent-genome abundance

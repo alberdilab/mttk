@@ -21,6 +21,7 @@ Description: MTTK helps users organize genome-resolved
 Depends:
     R (>= 4.3.0)
 Imports:
+    ape,
     glmmTMB,
     methods,
     SingleCellExperiment,
@@ -47,6 +48,7 @@ Collate:
     'MTTKFit-class.R'
     'MTTKFit.R'
     'MTTKFit-meta-analysis.R'
+    'MTTKFit-phylogeny.R'
     'MTTKExperiment-analysis.R'
     'MTTKExperiment-modeling.R'
     'MTTKExample.R'

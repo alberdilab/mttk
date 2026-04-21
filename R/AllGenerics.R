@@ -58,6 +58,18 @@ methods::setGeneric("genomeData<-", function(x, value) {
     standardGeneric("genomeData<-")
 })
 
+#' @rdname genomeTree
+#' @export
+methods::setGeneric("genomeTree", function(x) {
+    standardGeneric("genomeTree")
+})
+
+#' @rdname genomeTree
+#' @export
+methods::setGeneric("genomeTree<-", function(x, value) {
+    standardGeneric("genomeTree<-")
+})
+
 #' @rdname links
 #' @export
 methods::setGeneric("links", function(x) {

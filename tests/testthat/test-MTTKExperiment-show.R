@@ -9,6 +9,7 @@ test_that("show method summarizes the main MTTKExperiment components", {
     expect_true(any(grepl("^colData names\\(2\\): sample_id, condition$", output)))
     expect_true(any(grepl("^genomeData rows\\(2\\): 2$", output)))
     expect_true(any(grepl("^genomeAssays\\(1\\): dna_genome_counts$", output)))
+    expect_true(any(grepl("^genomeTree tips\\(0\\): 0$", output)))
     expect_true(any(grepl("^links\\(2\\): gene_to_genome, gene_to_ko$", output)))
     expect_true(any(grepl("^activeHierarchies\\(2\\): biological, functional$", output)))
     expect_true(any(grepl("^rowTreeNames\\(0\\): none$", output)))

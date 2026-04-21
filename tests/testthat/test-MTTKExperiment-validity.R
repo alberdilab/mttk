@@ -25,6 +25,10 @@ test_that("replacement accessors reject invalid values", {
         activeHierarchies(x) <- c("biological", ""),
         "must contain non-missing, non-empty names"
     )
+    expect_error(
+        genomeTree(x) <- "not_a_tree",
+        "must be an ape::phylo object or NULL"
+    )
 })
 
 test_that("constructor requires authoritative genome ids in rowData", {
@@ -233,6 +237,16 @@ test_that("validity catches mismatched mirrored genome identifiers", {
             activeHierarchies = components$activeHierarchies
         ),
         "genomeData\\(x\\)\\$genome_id.*rownames\\(genomeExperiment\\(x\\)\\)"
+    )
+})
+
+test_that("validity catches genome trees with mismatched tip labels", {
+    x <- make_test_mttk()
+    bad_tree <- ape::read.tree(text = "(genome_1:0.1,genome_x:0.1)root;")
+
+    expect_error(
+        genomeTree(x) <- bad_tree,
+        "tip labels must match.*rownames\\(genomeExperiment\\(x\\)\\)"
     )
 })
 

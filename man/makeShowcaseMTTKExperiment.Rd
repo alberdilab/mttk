@@ -20,6 +20,7 @@ The returned object contains:
 \item sixteen genes measured across six samples,
 \item both \code{rna_gene_counts} and genome-level \code{rna_genome_counts},
 \item a genome-level \code{dna_genome_counts} assay stored in \code{genomeExperiment(x)},
+\item a rooted genome phylogeny stored in \code{genomeTree(x)},
 \item four genomes spanning two domains,
 \item sample metadata for a synthetic oxygen-pulse experiment,
 \item direct many-to-many links from KO to module and pathway.

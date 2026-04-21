@@ -19,14 +19,15 @@ documentation, and quick interactive use.
 }
 \details{
 The object contains one gene-level assay (\code{rna_gene_counts}), one
-genome-level assay (\code{dna_genome_counts}), six genes, four samples, three
-genomes, and a small set of biological and functional link tables.
+genome-level assay (\code{dna_genome_counts}), a rooted genome phylogeny, six
+genes, four samples, three genomes, and a small set of biological and
+functional link tables.
 }
 \examples{
 data("MTTKExample")
 MTTKExample
 genomeData(MTTKExample)
-dnaGenomeCounts(MTTKExample)
+genomeTree(MTTKExample)
 
 }
 \keyword{datasets}

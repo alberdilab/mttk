@@ -117,6 +117,10 @@
         )
     )
 
+    genome_tree <- ape::read.tree(
+        text = "((genome_1:0.1,genome_2:0.1)Bacteria_clade:0.2,genome_3:0.3)root;"
+    )
+
     list(
         assays = list(
             rna_gene_counts = rna_gene_counts
@@ -127,6 +131,7 @@
             dna_genome_counts = dna_genome_counts
         ),
         genomeData = genome_data,
+        genomeTree = genome_tree,
         links = link_tables,
         activeHierarchies = c("biological_origin", "functional_annotation"),
         metadata = list(
@@ -145,6 +150,7 @@
         colData = components$colData,
         genomeAssays = components$genomeAssays,
         genomeData = components$genomeData,
+        genomeTree = components$genomeTree,
         links = components$links,
         activeHierarchies = components$activeHierarchies,
         metadata = components$metadata
@@ -161,6 +167,7 @@
 #' - six genes measured across four samples,
 #' - a gene-level `rna_gene_counts` assay,
 #' - a genome-level `dna_genome_counts` assay stored in `genomeExperiment(x)`,
+#' - a rooted genome phylogeny stored in `genomeTree(x)`,
 #' - feature, sample, and genome metadata,
 #' - explicit biological and functional mapping tables, including direct
 #'   many-to-many `ko_to_module` and `ko_to_pathway` links.
@@ -183,8 +190,9 @@ makeExampleMTTKExperiment <- function() {
 #' documentation, and quick interactive use.
 #'
 #' The object contains one gene-level assay (`rna_gene_counts`), one
-#' genome-level assay (`dna_genome_counts`), six genes, four samples, three
-#' genomes, and a small set of biological and functional link tables.
+#' genome-level assay (`dna_genome_counts`), a rooted genome phylogeny, six
+#' genes, four samples, three genomes, and a small set of biological and
+#' functional link tables.
 #'
 #' @docType data
 #' @format An `MTTKExperiment` object with 6 rows and 4 columns.
@@ -197,7 +205,7 @@ makeExampleMTTKExperiment <- function() {
 #' data("MTTKExample")
 #' MTTKExample
 #' genomeData(MTTKExample)
-#' dnaGenomeCounts(MTTKExample)
+#' genomeTree(MTTKExample)
 #'
 "MTTKExample"
 
@@ -341,6 +349,13 @@ makeExampleMTTKExperiment <- function() {
         )
     )
 
+    genome_tree <- ape::read.tree(
+        text = paste0(
+            "((genome_1:0.1,genome_2:0.1)Bacteria_clade:0.35,",
+            "(genome_3:0.1,genome_4:0.1)Archaea_clade:0.35)root;"
+        )
+    )
+
     rna_genome_counts <- base::rowsum(
         rna_gene_counts,
         group = as.character(row_data$genome_id),
@@ -359,6 +374,7 @@ makeExampleMTTKExperiment <- function() {
             dna_genome_counts = dna_genome_counts
         ),
         genomeData = genome_data,
+        genomeTree = genome_tree,
         links = link_tables,
         activeHierarchies = c("biological_origin", "functional_annotation"),
         metadata = list(
@@ -380,6 +396,7 @@ makeExampleMTTKExperiment <- function() {
         colData = components$colData,
         genomeAssays = components$genomeAssays,
         genomeData = components$genomeData,
+        genomeTree = components$genomeTree,
         links = components$links,
         activeHierarchies = components$activeHierarchies,
         metadata = components$metadata
@@ -397,6 +414,7 @@ makeExampleMTTKExperiment <- function() {
 #' - sixteen genes measured across six samples,
 #' - both `rna_gene_counts` and genome-level `rna_genome_counts`,
 #' - a genome-level `dna_genome_counts` assay stored in `genomeExperiment(x)`,
+#' - a rooted genome phylogeny stored in `genomeTree(x)`,
 #' - four genomes spanning two domains,
 #' - sample metadata for a synthetic oxygen-pulse experiment,
 #' - direct many-to-many links from KO to module and pathway.
@@ -419,10 +437,10 @@ makeShowcaseMTTKExperiment <- function() {
 #' walkthroughs of the main MTTK workflows.
 #'
 #' The object contains one gene-level assay (`rna_gene_counts`), two
-#' genome-level assays (`rna_genome_counts` and `dna_genome_counts`), sixteen
-#' genes, six samples, four genomes, and a small set of overlapping functional
-#' mappings chosen to support KO-, module-, pathway-, genome-, and
-#' group-comparison examples.
+#' genome-level assays (`rna_genome_counts` and `dna_genome_counts`), a rooted
+#' genome phylogeny, sixteen genes, six samples, four genomes, and a small set
+#' of overlapping functional mappings chosen to support KO-, module-,
+#' pathway-, genome-, and group-comparison examples.
 #'
 #' @docType data
 #' @format An `MTTKExperiment` object with 16 rows and 6 columns.
@@ -435,6 +453,6 @@ makeShowcaseMTTKExperiment <- function() {
 #' data("MTTKShowcase")
 #' MTTKShowcase
 #' genomeData(MTTKShowcase)
-#' names(genomeAssays(MTTKShowcase))
+#' genomeTree(MTTKShowcase)
 #'
 "MTTKShowcase"

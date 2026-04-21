@@ -25,6 +25,7 @@ In this setting:
 
 - genes are nested within genomes,
 - genome abundance can be measured separately from gene RNA,
+- genome relationships can be represented explicitly with a phylogenetic tree,
 - genes can also be organized into functional hierarchies such as KO, module,
   and pathway.
 
@@ -63,6 +64,13 @@ names(genomeAssays(x))
 names(links(x))
 ```
 
+The same object can also store a rooted genome phylogeny for tree-based
+follow-up analyses.
+
+```{r}
+genomeTree(x)
+```
+
 The main assay-level accessors are:
 
 ```{r}
@@ -78,12 +86,20 @@ The most useful way to approach MTTK is to start from the biological question.
 - Use `fitGeneModel()` when the question is "which individual genes change?"
 - Use `fitGenomeModel()` when the question is "which genomes shift overall
   transcription?"
+- Use `fitGenomePhylogeneticSignal()` when the question is "do closely related
+  genomes tend to respond similarly overall?"
+- Use `scanGenomeClades()` when the question is "is there a subtree in the
+  genome phylogeny with an unusually high or low response?"
 - Use `fitGenomeGroupMetaAnalysis()` when the question is "do genomes from the
   same clade or domain respond coherently?"
 - Use `fitKOMixedModel()` when the question is "which functions, represented as
   KOs, respond across genomes?"
 - Use `fitKORandomSlopeModel()` when the question is "does the same KO behave
   differently in different genomes?"
+- Use `fitKOPhylogeneticSignal()` when the question is "for a given KO, do the
+  genome-specific KO responses follow the phylogeny?"
+- Use `scanKOClades()` when the question is "is there a subtree where a KO
+  responds in a distinct way?"
 - Use `fitKOGenomeGroupMetaAnalysis()` and `compareKOGenomeGroups()` when the
   question is "within or between clades, do KO responses differ?"
 - Use `fitModuleMetaAnalysis()` or `fitPathwayMetaAnalysis()` when the question
@@ -138,6 +154,29 @@ genome_domain_fit
 
 This is useful for questions such as "do archaeal MAGs tend to respond
 similarly?" even when the individual genomes are not identical in magnitude.
+
+## Following genome responses with the phylogeny
+
+When the genome relationships are better represented by a tree than by a single
+label column, MTTK can test whether genome-level responses show overall
+phylogenetic signal.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+fitGenomePhylogeneticSignal(genome_fit, x, nPerm = 99)
+```
+
+That workflow asks whether more closely related genomes tend to have more
+similar fitted responses.
+
+If the question is more local than global, scan the rooted tree for clades with
+shifted mean responses.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+scanGenomeClades(genome_fit, x, nPerm = 99, minTips = 2)
+```
+
+This is useful for questions such as "is there a subtree of related genomes
+that becomes more transcriptionally active during the oxygen pulse?"
 
 # Question 3: Which KOs respond across genomes?
 
@@ -208,6 +247,29 @@ compareKOGenomeGroups(
 
 This is especially useful for questions such as "is this KO more strongly
 induced in archaea than in bacteria?"
+
+## Following KO responses with the phylogeny
+
+The same KO random-slope fit can also be summarized against the genome
+phylogeny instead of a taxonomic label.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+fitKOPhylogeneticSignal(ko_rs_fit, x, nPerm = 99, minGenomes = 3)
+```
+
+This asks whether closely related genomes tend to show similar KO-specific
+responses.
+
+If the goal is to localize that pattern, scan the rooted tree for clades with
+distinct KO responses.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+scanKOClades(ko_rs_fit, x, nPerm = 99, minTips = 2, minGenomes = 3)
+```
+
+This is the right follow-up for questions such as "is there a related subset of
+genomes in which this KO is strongly induced, while the rest of the tree shows
+a weaker or opposite response?"
 
 # Question 5: Do higher-level functions show coherent KO-level responses?
 

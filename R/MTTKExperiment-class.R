@@ -32,6 +32,8 @@
 #'   one row per genome. `rownames(genomeExperiment(x))` are the canonical
 #'   genome identifiers. If `genomeData(x)$genome_id` is present, it must match
 #'   those row names exactly.
+#' - `genomeTree(x)` can store an optional genome phylogeny as an `ape::phylo`
+#'   object. Tip labels must match `rownames(genomeExperiment(x))` exactly.
 #' - `genomeAssays(x)` names the assay collection stored in
 #'   `genomeExperiment(x)`.
 #' - `rowTree` and `rowLinks` can store optional named hierarchies when a
@@ -46,6 +48,8 @@
 #' - `rowData(x)$genome_id` defines the core biological nesting of genes within
 #'   genomes.
 #' - `genomeData(x)` is stored as `rowData(genomeExperiment(x))`.
+#' - `genomeTree(x)` is stored as genome-layer metadata alongside
+#'   `genomeExperiment(x)`.
 #' - explicit assay names such as `"rna_gene_counts"`, `"rna_genome_counts"`,
 #'   and `"dna_genome_counts"` make it clear which data layer an assay belongs
 #'   to.

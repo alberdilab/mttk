@@ -14,6 +14,7 @@ MTTKExperiment(
   genomeExperiment = NULL,
   genomeAssays = NULL,
   genomeData = NULL,
+  genomeTree = NULL,
   links = NULL,
   activeHierarchies = NULL,
   metadata = list()
@@ -50,6 +51,9 @@ assays without building \code{genomeExperiment} by hand.}
 \item{genomeData}{Genome-level metadata as an \code{S4Vectors::DataFrame} or
 \code{data.frame}. When genome-level assays are present, this becomes
 \code{rowData(genomeExperiment(x))}.}
+
+\item{genomeTree}{Optional genome phylogeny as an \code{ape::phylo} object. Tip
+labels must match \code{rownames(genomeExperiment(x))} exactly.}
 
 \item{links}{A named \code{S4Vectors::SimpleList} or named \code{list} of mapping
 tables. Each entry must be an \code{S4Vectors::DataFrame} or \code{data.frame}. A

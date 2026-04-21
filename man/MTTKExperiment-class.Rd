@@ -38,6 +38,8 @@ or aggregated genome RNA counts in a dedicated companion experiment with
 one row per genome. \code{rownames(genomeExperiment(x))} are the canonical
 genome identifiers. If \code{genomeData(x)$genome_id} is present, it must match
 those row names exactly.
+\item \code{genomeTree(x)} can store an optional genome phylogeny as an \code{ape::phylo}
+object. Tip labels must match \code{rownames(genomeExperiment(x))} exactly.
 \item \code{genomeAssays(x)} names the assay collection stored in
 \code{genomeExperiment(x)}.
 \item \code{rowTree} and \code{rowLinks} can store optional named hierarchies when a
@@ -55,6 +57,8 @@ canonical gene, sample, and genome identifiers used by the package.
 \item \code{rowData(x)$genome_id} defines the core biological nesting of genes within
 genomes.
 \item \code{genomeData(x)} is stored as \code{rowData(genomeExperiment(x))}.
+\item \code{genomeTree(x)} is stored as genome-layer metadata alongside
+\code{genomeExperiment(x)}.
 \item explicit assay names such as \code{"rna_gene_counts"}, \code{"rna_genome_counts"},
 and \code{"dna_genome_counts"} make it clear which data layer an assay belongs
 to.

@@ -94,6 +94,23 @@ test_that("declared gene and genome accessors expose the two data layers", {
     expect_identical(dim(dnaGenomeCounts(x)), c(2L, 3L))
 })
 
+test_that("genomeTree can be set, retrieved, and create a genome layer when needed", {
+    x <- MTTKExperiment(
+        assays = make_test_components()$assays,
+        rowData = make_test_components()$rowData,
+        colData = make_test_components()$colData
+    )
+    tree <- ape::read.tree(text = "(genome_1:0.1,genome_2:0.1)root;")
+
+    genomeTree(x) <- tree
+
+    expect_s4_class(genomeExperiment(x), "SummarizedExperiment")
+    expect_s3_class(genomeTree(x), "phylo")
+    expect_identical(sort(genomeTree(x)$tip.label), c("genome_1", "genome_2"))
+    expect_identical(rownames(genomeData(x)), c("genome_1", "genome_2"))
+    expect_true(methods::validObject(x))
+})
+
 test_that("genome-level count accessors can create and update the genome experiment", {
     counts <- matrix(
         c(1L, 2L, 3L, 4L),

@@ -28,6 +28,8 @@ test_that("the packaged example object is available and reproducible", {
         )
     )
     expect_identical(rownames(genomeData(MTTKExample)), c("genome_1", "genome_2", "genome_3"))
+    expect_s3_class(genomeTree(MTTKExample), "phylo")
+    expect_identical(sort(genomeTree(MTTKExample)$tip.label), c("genome_1", "genome_2", "genome_3"))
     expect_identical(dim(dnaGenomeCounts(MTTKExample)), c(3L, 4L))
     expect_identical(S4Vectors::metadata(MTTKExample)$study_name,
         "Synthetic genome-resolved metatranscriptomics example"
@@ -54,6 +56,8 @@ test_that("the packaged showcase object is available and reproducible", {
         c("rna_genome_counts", "dna_genome_counts")
     )
     expect_identical(rownames(genomeData(MTTKShowcase)), c("genome_1", "genome_2", "genome_3", "genome_4"))
+    expect_s3_class(genomeTree(MTTKShowcase), "phylo")
+    expect_identical(sort(genomeTree(MTTKShowcase)$tip.label), c("genome_1", "genome_2", "genome_3", "genome_4"))
     expect_identical(dim(rnaGenomeCounts(MTTKShowcase)), c(4L, 6L))
     expect_identical(dim(dnaGenomeCounts(MTTKShowcase)), c(4L, 6L))
     domain_table <- table(as.character(genomeData(MTTKShowcase)$domain))

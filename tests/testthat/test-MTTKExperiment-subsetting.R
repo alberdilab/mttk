@@ -31,6 +31,17 @@ test_that("row subsetting prunes genome-level rows and dependent links", {
     expect_true(methods::validObject(y))
 })
 
+test_that("row subsetting also prunes the stored genome tree", {
+    x <- makeShowcaseMTTKExperiment()
+
+    y <- x[1:8, ]
+
+    expect_s3_class(genomeTree(y), "phylo")
+    expect_identical(sort(genomeTree(y)$tip.label), c("genome_1", "genome_2"))
+    expect_identical(rownames(genomeData(y)), c("genome_1", "genome_2"))
+    expect_true(methods::validObject(y))
+})
+
 test_that("row subsetting works without a stored gene_to_genome link table", {
     x <- makeExampleMTTKExperiment()
     kept_links <- links(x)

@@ -1,4 +1,5 @@
 .mttk_genome_alt_name <- "genomes"
+.mttk_genome_tree_metadata_name <- "mttk_genome_tree"
 
 .empty_mttk_state <- function() {
     list(
@@ -512,6 +513,10 @@
     kept_genomes <- unique(as.character(.core_gene_to_genome_link(x)$genome_id))
     keep <- rownames(genome_experiment) %in% kept_genomes
     genome_experiment <- genome_experiment[keep, , drop = FALSE]
+    genome_experiment <- .set_stored_genome_tree(
+        genome_experiment,
+        .prune_genome_tree(.stored_genome_tree(genome_experiment), rownames(genome_experiment))
+    )
 
     .set_genome_experiment(x, genome_experiment)
 }
@@ -568,6 +573,130 @@
         rowData = genome_data,
         colData = col_data
     )
+}
+
+.normalize_genome_tree <- function(tree, genome_ids = NULL) {
+    if (is.null(tree)) {
+        return(NULL)
+    }
+
+    if (!inherits(tree, "phylo")) {
+        stop("'genomeTree' must be an ape::phylo object or NULL.", call. = FALSE)
+    }
+
+    tip_labels <- tree$tip.label
+    if (is.null(tip_labels) || anyNA(tip_labels) || any(tip_labels == "")) {
+        stop(
+            "'genomeTree' must have non-empty, non-missing tip labels.",
+            call. = FALSE
+        )
+    }
+
+    tip_labels <- as.character(tip_labels)
+    if (anyDuplicated(tip_labels)) {
+        stop("'genomeTree' tip labels must be unique.", call. = FALSE)
+    }
+
+    tree$tip.label <- tip_labels
+
+    if (!is.null(genome_ids)) {
+        genome_ids <- as.character(genome_ids)
+        genome_ids <- genome_ids[!is.na(genome_ids) & genome_ids != ""]
+
+        if (!setequal(tip_labels, genome_ids)) {
+            stop(
+                paste(
+                    "'genomeTree' tip labels must match",
+                    "'rownames(genomeExperiment(x))' exactly."
+                ),
+                call. = FALSE
+            )
+        }
+    }
+
+    tree
+}
+
+.stored_genome_tree <- function(genome_experiment) {
+    if (is.null(genome_experiment)) {
+        return(NULL)
+    }
+
+    S4Vectors::metadata(genome_experiment)[[.mttk_genome_tree_metadata_name]]
+}
+
+.set_stored_genome_tree <- function(genome_experiment, tree) {
+    metadata_list <- S4Vectors::metadata(genome_experiment)
+    metadata_list[[.mttk_genome_tree_metadata_name]] <- tree
+    S4Vectors::metadata(genome_experiment) <- metadata_list
+    genome_experiment
+}
+
+.get_genome_tree <- function(x) {
+    genome_experiment <- .get_genome_experiment(x)
+
+    if (is.null(genome_experiment)) {
+        return(NULL)
+    }
+
+    .stored_genome_tree(genome_experiment)
+}
+
+.empty_genome_experiment_from_mapping <- function(x) {
+    genome_ids <- unique(as.character(.core_gene_to_genome_link(x)$genome_id))
+    genome_ids <- genome_ids[!is.na(genome_ids) & genome_ids != ""]
+
+    if (length(genome_ids) == 0L) {
+        stop(
+            "No genome identifiers are available to store a genome phylogeny.",
+            call. = FALSE
+        )
+    }
+
+    .empty_genome_experiment(
+        col_data = SummarizedExperiment::colData(x),
+        genome_data = S4Vectors::DataFrame(row.names = genome_ids)
+    )
+}
+
+.set_genome_tree <- function(x, value) {
+    genome_experiment <- .get_genome_experiment(x)
+
+    if (is.null(genome_experiment)) {
+        if (is.null(value)) {
+            methods::validObject(x)
+            return(x)
+        }
+
+        genome_experiment <- .empty_genome_experiment_from_mapping(x)
+    }
+
+    value <- .normalize_genome_tree(
+        value,
+        genome_ids = rownames(genome_experiment)
+    )
+    genome_experiment <- .set_stored_genome_tree(genome_experiment, value)
+    .set_genome_experiment(x, genome_experiment)
+}
+
+.prune_genome_tree <- function(tree, genome_ids) {
+    if (is.null(tree)) {
+        return(NULL)
+    }
+
+    genome_ids <- unique(as.character(genome_ids))
+    genome_ids <- genome_ids[!is.na(genome_ids) & genome_ids != ""]
+
+    if (length(genome_ids) == 0L) {
+        return(NULL)
+    }
+
+    drop_ids <- setdiff(tree$tip.label, genome_ids)
+    if (length(drop_ids) > 0L) {
+        tree <- ape::drop.tip(tree, tip = drop_ids)
+    }
+
+    .normalize_genome_tree(tree, genome_ids = genome_ids)
 }
 
 .as_tree_summarized_experiment <- function(x) {
@@ -1043,6 +1172,21 @@
 
         if (!is.null(genome_id_problem)) {
             problems <- c(problems, genome_id_problem)
+        }
+
+        genome_tree_problem <- tryCatch(
+            {
+                .normalize_genome_tree(
+                    .stored_genome_tree(genome_experiment),
+                    genome_ids = rownames(genome_experiment)
+                )
+                NULL
+            },
+            error = function(e) conditionMessage(e)
+        )
+
+        if (!is.null(genome_tree_problem)) {
+            problems <- c(problems, genome_tree_problem)
         }
     }
 

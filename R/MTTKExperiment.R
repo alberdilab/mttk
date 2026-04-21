@@ -29,6 +29,8 @@
 #' @param genomeData Genome-level metadata as an `S4Vectors::DataFrame` or
 #'   `data.frame`. When genome-level assays are present, this becomes
 #'   `rowData(genomeExperiment(x))`.
+#' @param genomeTree Optional genome phylogeny as an `ape::phylo` object. Tip
+#'   labels must match `rownames(genomeExperiment(x))` exactly.
 #' @param links A named `S4Vectors::SimpleList` or named `list` of mapping
 #'   tables. Each entry must be an `S4Vectors::DataFrame` or `data.frame`. A
 #'   `gene_to_genome` table is optional because the core nesting is defined by
@@ -55,6 +57,7 @@ MTTKExperiment <- function(
     genomeExperiment = NULL,
     genomeAssays = NULL,
     genomeData = NULL,
+    genomeTree = NULL,
     links = NULL,
     activeHierarchies = NULL,
     metadata = list()
@@ -96,6 +99,10 @@ MTTKExperiment <- function(
         out <- .set_genome_experiment(out, genome_experiment)
     }
 
+    if (!is.null(genomeTree)) {
+        out <- .set_genome_tree(out, genomeTree)
+    }
+
     out <- .update_mttk_state(
         out,
         links = links,
@@ -117,6 +124,8 @@ methods::setMethod("show", "MTTKExperiment", function(object) {
     } else {
         names(SummarizedExperiment::assays(genome_experiment, withDimnames = FALSE))
     }
+    genome_tree <- genomeTree(object)
+    genome_tree_count <- if (is.null(genome_tree)) 0L else length(genome_tree$tip.label)
     link_names <- names(links(object))
     hierarchy_names <- activeHierarchies(object)
     row_tree_names <- TreeSummarizedExperiment::rowTreeNames(object)
@@ -163,6 +172,7 @@ methods::setMethod("show", "MTTKExperiment", function(object) {
         "\n",
         sep = ""
     )
+    cat("genomeTree tips(", genome_tree_count, "): ", genome_tree_count, "\n", sep = "")
     cat("links(", length(link_names), "): ", .format_preview(link_names), "\n", sep = "")
     cat(
         "activeHierarchies(",

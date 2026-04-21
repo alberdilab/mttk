@@ -182,6 +182,33 @@ methods::setReplaceMethod("genomeData", "MTTKExperiment", function(x, value) {
     .set_genome_experiment(x, genome_experiment)
 })
 
+#' Genome-Level Phylogeny
+#'
+#' `genomeTree()` returns the genome phylogeny stored alongside the
+#' genome-level layer of an `MTTKExperiment`.
+#'
+#' The returned tree should have one tip per genome in `genomeExperiment(x)`,
+#' with tip labels that match `rownames(genomeExperiment(x))`. Rooted trees are
+#' recommended in general and required for clade-scanning workflows.
+#'
+#' @param x An `MTTKExperiment`.
+#' @param value For replacement methods, an `ape::phylo` object or `NULL`.
+#'
+#' @return `genomeTree()` returns an `ape::phylo` object or `NULL`. The
+#'   replacement method returns an updated `MTTKExperiment`.
+#'
+#' @rdname genomeTree
+#' @export
+methods::setMethod("genomeTree", "MTTKExperiment", function(x) {
+    .get_genome_tree(x)
+})
+
+#' @rdname genomeTree
+#' @export
+methods::setReplaceMethod("genomeTree", "MTTKExperiment", function(x, value) {
+    .set_genome_tree(x, value)
+})
+
 #' Explicit Mapping Tables
 #'
 #' `links()` returns the named collection of mapping tables stored in an
