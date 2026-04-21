@@ -31,6 +31,93 @@ test_that("MTTKFit subsetting prunes stored model objects", {
     expect_identical(modelObjects(subset_fit)[[2]]$id, "m1")
 })
 
+test_that("koGenomeEffects returns stored KO-by-genome effects and subsets with the fit", {
+    fit <- MTTKFit(
+        results = data.frame(
+            ko_id = c("K03043", "K02111"),
+            estimate = c(0.5, -0.3),
+            row.names = c("K03043", "K02111")
+        ),
+        info = list(
+            model = "ko_random_slope_model",
+            featureIdColumn = "ko_id",
+            groupEffectColumn = "genome_id"
+        ),
+        models = list(
+            K03043 = list(id = "m1"),
+            K02111 = list(id = "m2")
+        )
+    )
+
+    metadata_list <- S4Vectors::metadata(fit)
+    metadata_list$mttk_fit$groupEffects <- S4Vectors::DataFrame(
+        ko_id = c("K03043", "K03043", "K02111"),
+        genome_id = c("genome_1", "genome_2", "genome_1"),
+        conditional_effect_estimate = c(0.6, 0.4, -0.2),
+        row.names = c("K03043::genome_1", "K03043::genome_2", "K02111::genome_1")
+    )
+    S4Vectors::metadata(fit) <- metadata_list
+
+    effects <- koGenomeEffects(fit)
+    expect_s4_class(effects, "DataFrame")
+    expect_identical(rownames(effects), c("K03043::genome_1", "K03043::genome_2", "K02111::genome_1"))
+    expect_identical(as.character(effects$ko_id), c("K03043", "K03043", "K02111"))
+
+    subset_fit <- fit["K03043", , drop = FALSE]
+    subset_effects <- koGenomeEffects(subset_fit)
+    expect_identical(rownames(subset_effects), c("K03043::genome_1", "K03043::genome_2"))
+    expect_identical(names(modelObjects(subset_fit)), "K03043")
+})
+
+test_that("moduleGenomeEffects and pathwayGenomeEffects return stored feature-by-genome effects", {
+    module_fit <- MTTKFit(
+        results = data.frame(
+            module_id = "M00001",
+            estimate = 0.5,
+            row.names = "M00001"
+        ),
+        info = list(
+            model = "module_random_slope_model",
+            featureIdColumn = "module_id",
+            groupEffectColumn = "genome_id"
+        )
+    )
+    module_metadata <- S4Vectors::metadata(module_fit)
+    module_metadata$mttk_fit$groupEffects <- S4Vectors::DataFrame(
+        module_id = "M00001",
+        genome_id = "genome_1",
+        conditional_effect_estimate = 0.6,
+        conditional_effect_std_error = 0.2,
+        row.names = "M00001::genome_1"
+    )
+    S4Vectors::metadata(module_fit) <- module_metadata
+
+    pathway_fit <- MTTKFit(
+        results = data.frame(
+            pathway_id = "map00010",
+            estimate = 0.5,
+            row.names = "map00010"
+        ),
+        info = list(
+            model = "pathway_random_slope_model",
+            featureIdColumn = "pathway_id",
+            groupEffectColumn = "genome_id"
+        )
+    )
+    pathway_metadata <- S4Vectors::metadata(pathway_fit)
+    pathway_metadata$mttk_fit$groupEffects <- S4Vectors::DataFrame(
+        pathway_id = "map00010",
+        genome_id = "genome_1",
+        conditional_effect_estimate = 0.6,
+        conditional_effect_std_error = 0.2,
+        row.names = "map00010::genome_1"
+    )
+    S4Vectors::metadata(pathway_fit) <- pathway_metadata
+
+    expect_identical(rownames(moduleGenomeEffects(module_fit)), "M00001::genome_1")
+    expect_identical(rownames(pathwayGenomeEffects(pathway_fit)), "map00010::genome_1")
+})
+
 test_that("fitTable filters and sorts fit results", {
     fit <- make_test_fit()
     tbl <- fitTable(fit, status = "ok", sortBy = "q_value")

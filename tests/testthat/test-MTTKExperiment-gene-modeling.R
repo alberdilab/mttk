@@ -3,7 +3,7 @@ test_that("makeGeneModelData aligns gene/sample observations and offsets", {
     model_data <- makeGeneModelData(
         x,
         variable = "condition",
-        model = "library_plus_genome_abundance"
+        genomeOffset = TRUE
     )
 
     expect_s4_class(model_data, "DataFrame")
@@ -22,6 +22,8 @@ test_that("makeGeneModelData aligns gene/sample observations and offsets", {
 
     model_state <- S4Vectors::metadata(model_data)$mttk_gene_model
     expect_identical(model_state$specification, "library_plus_genome_abundance")
+    expect_identical(model_state$libraryOffset, TRUE)
+    expect_identical(model_state$genomeOffset, TRUE)
     expect_identical(model_state$sourceAssay, "rna_gene_counts")
     expect_identical(model_state$libSizeSource, "colSums(rna_gene_counts)")
     expect_identical(model_state$genomeAssay, "dna_genome_counts")
@@ -51,7 +53,7 @@ test_that("fitGeneModel fits the library-only gene model", {
     skip_if_not_installed("glmmTMB")
 
     x <- makeExampleMTTKExperiment()
-    fit <- fitGeneModel(x, variable = "condition")
+    fit <- fitGeneModel(x, variable = "condition", genomeOffset = FALSE)
 
     expect_s4_class(fit, "MTTKFit")
     expect_identical(rownames(fit), paste0("gene_", seq_len(6)))
@@ -70,6 +72,8 @@ test_that("fitGeneModel fits the library-only gene model", {
     expect_identical(fitInfo(fit)$backend, "glmmTMB")
     expect_identical(fitInfo(fit)$model, "gene_model")
     expect_identical(fitInfo(fit)$specification, "library_only")
+    expect_identical(fitInfo(fit)$libraryOffset, TRUE)
+    expect_identical(fitInfo(fit)$genomeOffset, FALSE)
     expect_identical(fitInfo(fit)$responseAssay, "rna_gene_counts")
     expect_identical(fitInfo(fit)$variableType, "two_level_factor")
     expect_identical(fitInfo(fit)$referenceLevel, "control")
@@ -91,7 +95,7 @@ test_that("fitGeneModel can include genome abundance offsets and keep models", {
     fit <- fitGeneModel(
         x,
         variable = "condition",
-        model = "library_plus_genome_abundance",
+        genomeOffset = TRUE,
         keepFits = TRUE
     )
 
@@ -100,6 +104,8 @@ test_that("fitGeneModel can include genome abundance offsets and keep models", {
         fitInfo(fit)$specification,
         "library_plus_genome_abundance"
     )
+    expect_identical(fitInfo(fit)$libraryOffset, TRUE)
+    expect_identical(fitInfo(fit)$genomeOffset, TRUE)
     expect_identical(fitInfo(fit)$genomeAssay, "dna_genome_counts")
     expect_identical(fitInfo(fit)$offsetPseudocount, 1)
     expect_identical(sort(names(modelObjects(fit))), sort(rownames(fit)))
@@ -138,7 +144,7 @@ test_that("fitGeneModel validates modeling inputs", {
         fitGeneModel(
             x,
             variable = "condition",
-            model = "library_plus_genome_abundance",
+            genomeOffset = TRUE,
             genomeAssay = "missing_assay"
         ),
         "Unknown genome assay name"

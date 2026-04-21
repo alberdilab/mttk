@@ -7,8 +7,9 @@
 makeGeneModelData(
   x,
   variable,
-  model = c("library_only", "library_plus_genome_abundance"),
   assay = "rna_gene_counts",
+  libraryOffset = TRUE,
+  genomeOffset = NULL,
   libSize = NULL,
   genomeAssay = "dna_genome_counts",
   offsetPseudocount = 1
@@ -20,17 +21,20 @@ makeGeneModelData(
 \item{variable}{A single sample-level column name from \code{colData(x)}. The
 column must be numeric or a factor with exactly two levels.}
 
-\item{model}{Which of the two supported gene-level model specifications to
-prepare.}
-
 \item{assay}{Gene-level assay name used as the RNA response.}
+
+\item{libraryOffset}{Logical; if \code{TRUE}, include \code{offset(log(lib_size))}.}
+
+\item{genomeOffset}{Logical; if \code{TRUE}, include
+\code{offset(log(genome_abundance + offsetPseudocount))}. If \code{NULL} (the
+default), MTTK uses genome-abundance normalization when \code{genomeAssay} is
+available in \code{genomeExperiment(x)}.}
 
 \item{libSize}{Library-size offset specification. Use \code{NULL} to compute
 \code{colSums(rnaGeneCounts(x))}, a single \code{colData(x)} column name, or a
 numeric vector with one value per sample.}
 
-\item{genomeAssay}{Genome-level assay used when
-\code{model = "library_plus_genome_abundance"}.}
+\item{genomeAssay}{Genome-level assay used when \code{genomeOffset = TRUE}.}
 
 \item{offsetPseudocount}{Non-negative pseudocount added to genome abundance
 before log-offset calculation.}
@@ -52,7 +56,6 @@ across samples rather than which functions are associated across genomes.
 \examples{
 x <- makeExampleMTTKExperiment()
 gene_model_data <- makeGeneModelData(x, variable = "condition")
-head(as.data.frame(gene_model_data))
-S4Vectors::metadata(gene_model_data)$mttk_gene_model$effectLabel
+gene_model_data
 
 }

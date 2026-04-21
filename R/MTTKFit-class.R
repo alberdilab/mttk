@@ -10,8 +10,10 @@
 #' `metadata(x)$mttk_fit`.
 #'
 #' @section Canonical identifiers:
-#' `rownames(x)` are the canonical identifiers of the modeled features. If a
-#' `ko_id` or `gene_id` column is present, it must match `rownames(x)` exactly.
+#' `rownames(x)` are the canonical identifiers of the modeled features. When
+#' the modeled feature ID is also stored in a result column such as `ko_id`,
+#' `gene_id`, `genome_id`, `module_id`, or `pathway_id`, that canonical ID
+#' column must match `rownames(x)` exactly.
 #'
 #' @section Stored metadata:
 #' `metadata(x)$mttk_fit` is reserved for MTTK-specific fit metadata and may
@@ -43,22 +45,6 @@ NULL
         problems <- c(problems, "Modeled feature row names must be unique.")
     }
 
-    if ("ko_id" %in% names(object) &&
-        !identical(as.character(object$ko_id), as.character(feature_ids))) {
-        problems <- c(
-            problems,
-            "'ko_id' must match 'rownames(x)' exactly when present."
-        )
-    }
-
-    if ("gene_id" %in% names(object) &&
-        !identical(as.character(object$gene_id), as.character(feature_ids))) {
-        problems <- c(
-            problems,
-            "'gene_id' must match 'rownames(x)' exactly when present."
-        )
-    }
-
     if ("p_value" %in% names(object)) {
         p_value <- as.numeric(object$p_value)
         if (any(!is.na(p_value) & (p_value < 0 | p_value > 1))) {
@@ -84,7 +70,46 @@ NULL
             if (!is.null(fit_state$models) && !is.list(fit_state$models)) {
                 problems <- c(problems, "'metadata(x)$mttk_fit$models' must be a list.")
             }
+            if (!is.null(fit_state$groupEffects) &&
+                !methods::is(fit_state$groupEffects, "DataFrame") &&
+                !is.data.frame(fit_state$groupEffects)) {
+                problems <- c(
+                    problems,
+                    "'metadata(x)$mttk_fit$groupEffects' must be a DataFrame or data.frame."
+                )
+            }
         }
+    }
+
+    id_columns <- c("ko_id", "gene_id", "genome_id", "module_id", "pathway_id")
+    canonical_id_column <- NULL
+
+    if (!is.null(fit_state) &&
+        is.list(fit_state) &&
+        !is.null(fit_state$info) &&
+        is.list(fit_state$info) &&
+        !is.null(fit_state$info$featureIdColumn)) {
+        canonical_id_column <- as.character(fit_state$info$featureIdColumn)[1L]
+    }
+
+    if (is.null(canonical_id_column) || is.na(canonical_id_column) || canonical_id_column == "") {
+        present_id_columns <- intersect(id_columns, names(object))
+        if (length(present_id_columns) > 0L) {
+            canonical_id_column <- present_id_columns[[1L]]
+        }
+    }
+
+    if (!is.null(canonical_id_column) &&
+        canonical_id_column %in% names(object) &&
+        !identical(as.character(object[[canonical_id_column]]), as.character(feature_ids))) {
+        problems <- c(
+            problems,
+            paste0(
+                "'",
+                canonical_id_column,
+                "' must match 'rownames(x)' exactly when present."
+            )
+        )
     }
 
     if (length(problems) == 0L) {

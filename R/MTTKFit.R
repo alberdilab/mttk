@@ -63,17 +63,35 @@ MTTKFit <- function(results = NULL, info = list(), models = list()) {
 }
 
 .fit_feature_ids <- function(x) {
-    if ("ko_id" %in% names(x)) {
-        ids <- as.character(x$ko_id)
-    } else if ("gene_id" %in% names(x)) {
-        ids <- as.character(x$gene_id)
+    info <- fitInfo(x)
+    feature_id_column <- if (!is.null(info$featureIdColumn)) {
+        as.character(info$featureIdColumn)[1L]
     } else {
-        ids <- rownames(x)
+        NA_character_
+    }
+
+    if (!is.na(feature_id_column) &&
+        feature_id_column != "" &&
+        feature_id_column %in% names(x)) {
+        ids <- as.character(x[[feature_id_column]])
+    } else {
+        id_columns <- c("ko_id", "gene_id", "genome_id", "module_id", "pathway_id")
+        present_id_columns <- intersect(id_columns, names(x))
+
+        if (length(present_id_columns) > 0L) {
+            ids <- as.character(x[[present_id_columns[[1L]]]])
+        } else {
+            ids <- rownames(x)
+        }
     }
 
     if (is.null(ids) || anyNA(ids) || any(ids == "")) {
         stop(
-            "The fit must contain canonical feature identifiers in 'ko_id', 'gene_id', or row names.",
+            paste(
+                "The fit must contain canonical feature identifiers in",
+                "'ko_id', 'gene_id', 'genome_id', 'module_id', 'pathway_id',",
+                "the configured featureIdColumn, or row names."
+            ),
             call. = FALSE
         )
     }
@@ -91,6 +109,31 @@ MTTKFit <- function(results = NULL, info = list(), models = list()) {
     out <- models[kept]
     names(out) <- feature_ids[!is.na(matched)]
     out
+}
+
+.subset_group_effects <- function(group_effects, feature_ids, feature_id_column) {
+    if (is.null(group_effects)) {
+        return(NULL)
+    }
+
+    if (is.data.frame(group_effects) && !methods::is(group_effects, "DataFrame")) {
+        group_effects <- S4Vectors::DataFrame(group_effects, check.names = FALSE)
+    }
+
+    if (!methods::is(group_effects, "DataFrame")) {
+        return(group_effects)
+    }
+
+    if (is.null(feature_id_column) ||
+        length(feature_id_column) != 1L ||
+        is.na(feature_id_column) ||
+        feature_id_column == "" ||
+        !(feature_id_column %in% names(group_effects))) {
+        return(group_effects)
+    }
+
+    keep <- as.character(group_effects[[feature_id_column]]) %in% as.character(feature_ids)
+    group_effects[keep, , drop = FALSE]
 }
 
 .sort_fit_indices <- function(x, sortBy, decreasing) {
@@ -549,6 +592,193 @@ methods::setMethod("modelObjects", "MTTKFit", function(x) {
     fit_state$models
 })
 
+#' Extract KO-by-Genome Effects From a Random-Slope KO Fit
+#'
+#' `koGenomeEffects()` returns the KO-by-genome conditional coefficients stored
+#' alongside a KO random-slope model fit. Each row corresponds to one KO/genome
+#' combination and contains the conditional KO effect estimated for that genome.
+#'
+#' This workflow is intended as the first bridge between KO-level and
+#' genome-level analyses in MTTK. The returned table can be used to ask whether
+#' the same KO responds similarly or differently across genomes, and can later
+#' be joined to `genomeData(x)` for taxonomy-aware summaries.
+#'
+#' @param x An `MTTKFit` returned by [fitKORandomSlopeModel()].
+#'
+#' @return An `S4Vectors::DataFrame` with one row per KO/genome combination.
+#'
+#' @examples
+#' fit <- MTTKFit(
+#'     results = data.frame(
+#'         ko_id = "K00001",
+#'         estimate = 0.5,
+#'         row.names = "K00001"
+#'     ),
+#'     info = list(
+#'         model = "ko_random_slope_model",
+#'         featureIdColumn = "ko_id",
+#'         groupEffectColumn = "genome_id"
+#'     )
+#' )
+#' S4Vectors::metadata(fit)$mttk_fit$groupEffects <- S4Vectors::DataFrame(
+#'     ko_id = "K00001",
+#'     genome_id = "genome_1",
+#'     conditional_effect_estimate = 0.6,
+#'     row.names = "K00001::genome_1"
+#' )
+#' koGenomeEffects(fit)
+#'
+#' @export
+koGenomeEffects <- function(x) {
+    if (!methods::is(x, "MTTKFit")) {
+        stop("'x' must be an MTTKFit.", call. = FALSE)
+    }
+
+    info <- fitInfo(x)
+    if (!identical(info$model, "ko_random_slope_model")) {
+        stop(
+            "'x' must be an MTTKFit returned by fitKORandomSlopeModel().",
+            call. = FALSE
+        )
+    }
+
+    .stored_group_effects(x)
+}
+
+.stored_group_effects <- function(x) {
+    info <- fitInfo(x)
+    fit_state <- S4Vectors::metadata(x)$mttk_fit
+    if (!is.null(fit_state$groupEffects)) {
+        out <- fit_state$groupEffects
+        if (is.data.frame(out) && !methods::is(out, "DataFrame")) {
+            out <- S4Vectors::DataFrame(out, check.names = FALSE)
+        }
+        return(out)
+    }
+
+    models <- modelObjects(x)
+    if (length(models) == 0L) {
+        stop(
+            paste(
+                "This fit does not contain stored genome-specific conditional effects or backend model objects.",
+                "Refit with keepFits = TRUE or use the current random-slope fit output."
+            ),
+            call. = FALSE
+        )
+    }
+
+    stop(
+        paste(
+            "The genome-specific conditional effects are not stored in",
+            "metadata(x)$mttk_fit$groupEffects.",
+            "Please refit with the current version of",
+            if (!is.null(info$model)) info$model else "the random-slope workflow",
+            "."
+        ),
+        call. = FALSE
+    )
+}
+
+#' Extract Module-by-Genome Effects From a Random-Slope Module Fit
+#'
+#' `moduleGenomeEffects()` returns the module-by-genome conditional coefficients
+#' stored alongside a module random-slope model fit. Each row corresponds to
+#' one module/genome combination and contains the conditional module effect
+#' estimated for that genome.
+#'
+#' @param x An `MTTKFit` returned by [fitModuleRandomSlopeModel()].
+#'
+#' @return An `S4Vectors::DataFrame` with one row per module/genome
+#'   combination.
+#'
+#' @examples
+#' fit <- MTTKFit(
+#'     results = data.frame(
+#'         module_id = "M00001",
+#'         estimate = 0.5,
+#'         row.names = "M00001"
+#'     ),
+#'     info = list(
+#'         model = "module_random_slope_model",
+#'         featureIdColumn = "module_id",
+#'         groupEffectColumn = "genome_id"
+#'     )
+#' )
+#' S4Vectors::metadata(fit)$mttk_fit$groupEffects <- S4Vectors::DataFrame(
+#'     module_id = "M00001",
+#'     genome_id = "genome_1",
+#'     conditional_effect_estimate = 0.6,
+#'     row.names = "M00001::genome_1"
+#' )
+#' moduleGenomeEffects(fit)
+#'
+#' @export
+moduleGenomeEffects <- function(x) {
+    if (!methods::is(x, "MTTKFit")) {
+        stop("'x' must be an MTTKFit.", call. = FALSE)
+    }
+
+    info <- fitInfo(x)
+    if (!identical(info$model, "module_random_slope_model")) {
+        stop(
+            "'x' must be an MTTKFit returned by fitModuleRandomSlopeModel().",
+            call. = FALSE
+        )
+    }
+
+    .stored_group_effects(x)
+}
+
+#' Extract Pathway-by-Genome Effects From a Random-Slope Pathway Fit
+#'
+#' `pathwayGenomeEffects()` returns the pathway-by-genome conditional
+#' coefficients stored alongside a pathway random-slope model fit. Each row
+#' corresponds to one pathway/genome combination and contains the conditional
+#' pathway effect estimated for that genome.
+#'
+#' @param x An `MTTKFit` returned by [fitPathwayRandomSlopeModel()].
+#'
+#' @return An `S4Vectors::DataFrame` with one row per pathway/genome
+#'   combination.
+#'
+#' @examples
+#' fit <- MTTKFit(
+#'     results = data.frame(
+#'         pathway_id = "map00010",
+#'         estimate = 0.5,
+#'         row.names = "map00010"
+#'     ),
+#'     info = list(
+#'         model = "pathway_random_slope_model",
+#'         featureIdColumn = "pathway_id",
+#'         groupEffectColumn = "genome_id"
+#'     )
+#' )
+#' S4Vectors::metadata(fit)$mttk_fit$groupEffects <- S4Vectors::DataFrame(
+#'     pathway_id = "map00010",
+#'     genome_id = "genome_1",
+#'     conditional_effect_estimate = 0.6,
+#'     row.names = "map00010::genome_1"
+#' )
+#' pathwayGenomeEffects(fit)
+#'
+#' @export
+pathwayGenomeEffects <- function(x) {
+    if (!methods::is(x, "MTTKFit")) {
+        stop("'x' must be an MTTKFit.", call. = FALSE)
+    }
+
+    info <- fitInfo(x)
+    if (!identical(info$model, "pathway_random_slope_model")) {
+        stop(
+            "'x' must be an MTTKFit returned by fitPathwayRandomSlopeModel().",
+            call. = FALSE
+        )
+    }
+
+    .stored_group_effects(x)
+}
+
 #' Subset an MTTKFit
 #'
 #' `x[i, j]` subsets an `MTTKFit` by rows and columns while preserving fit
@@ -573,10 +803,21 @@ methods::setMethod(
         out <- methods::as(methods::callNextMethod(), "MTTKFit")
         fit_state <- S4Vectors::metadata(out)$mttk_fit
 
-        if (!is.null(fit_state) && !is.null(fit_state$models)) {
-            fit_state$models <- .subset_named_models(
-                fit_state$models,
-                feature_ids = rownames(out)
+        if (!is.null(fit_state)) {
+            if (!is.null(fit_state$models)) {
+                fit_state$models <- .subset_named_models(
+                    fit_state$models,
+                    feature_ids = rownames(out)
+                )
+            }
+            fit_state$groupEffects <- .subset_group_effects(
+                fit_state$groupEffects,
+                feature_ids = rownames(out),
+                feature_id_column = if (!is.null(fit_state$info$featureIdColumn)) {
+                    as.character(fit_state$info$featureIdColumn)[1L]
+                } else {
+                    NA_character_
+                }
             )
             metadata_list <- S4Vectors::metadata(out)
             metadata_list$mttk_fit <- fit_state

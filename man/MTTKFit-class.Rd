@@ -16,8 +16,10 @@ The class extends \link[S4Vectors:DataFrame-class]{S4Vectors::DFrame}, so it beh
 }
 \section{Canonical identifiers}{
 
-\code{rownames(x)} are the canonical identifiers of the modeled features. If a
-\code{ko_id} or \code{gene_id} column is present, it must match \code{rownames(x)} exactly.
+\code{rownames(x)} are the canonical identifiers of the modeled features. When
+the modeled feature ID is also stored in a result column such as \code{ko_id},
+\code{gene_id}, \code{genome_id}, \code{module_id}, or \code{pathway_id}, that canonical ID
+column must match \code{rownames(x)} exactly.
 }
 
 \section{Stored metadata}{

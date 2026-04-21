@@ -54,18 +54,99 @@ The difference is also in the modeling target, not just in the container.
   feature-by-sample design, with shrinkage for dispersion and fold changes.
 - `limma-voom` transforms counts to log-expression with precision weights, then
   fits weighted linear models per feature.
-- MTTK's first implemented workflow instead fits one `glmmTMB`
-  negative-binomial mixed model per KO after aggregating genes to
-  KO-within-genome counts, with `genome_id` as a random intercept and optional
-  genome-abundance offsets.
+- MTTK's current function-level workflows start from a KO-level
+  `glmmTMB` negative-binomial mixed model, then either:
+  - summarize KO effect sizes upward to modules or pathways with a
+    meta-analysis-like synthesis, or
+  - re-aggregate counts and refit a mixed model at module or pathway level
+    when the target is total functional activity.
 
 So the current MTTK workflow answers a different question:
 
 - standard RNA-seq workflows mostly ask whether each feature changes across
   samples,
-- the first MTTK modeling workflow asks whether a function, represented as a
-  KO, is associated with the condition across genomes while accounting for
-  between-genome heterogeneity.
+- the current MTTK workflows can ask either whether KO-level effects assigned
+  to a module or pathway are coherent, or whether total module/pathway activity
+  shifts across samples.
+
+## Choosing An Analysis
+
+The higher-level question matters, because MTTK currently supports two
+different module/pathway workflows.
+
+- If the question is "which individual KOs are associated with the variable?",
+  use `fitKOMixedModel()`.
+- If the question is "does the same KO respond differently across genomes?",
+  use `fitKORandomSlopeModel()` and then inspect the genome-specific KO effects
+  with `koGenomeEffects()`.
+- If the question is "within a taxonomic group or clade, does this KO show a
+  coherent genome-specific response?", fit KOs with random slopes first and
+  then use `fitKOGenomeGroupMetaAnalysis(..., group = "domain")` or another
+  grouping column from `genomeData(x)`.
+- If the question is "does this KO respond differently between two clades or
+  taxonomic groups?", first summarize KO genome effects with
+  `fitKOGenomeGroupMetaAnalysis()` and then compare groups with
+  `compareKOGenomeGroups()`.
+- If the question is "do the KOs belonging to this module or pathway show a
+  coherent association?", fit KOs first and then use
+  `fitModuleMetaAnalysis()` or `fitPathwayMetaAnalysis()`.
+  This works after either `fitKOMixedModel()` or `fitKORandomSlopeModel()`,
+  because the meta-analysis layer summarizes the KO-level fixed-effect
+  estimates from the fitted KO models.
+  Then choose `membershipMode` according to the overlap problem:
+  `duplicate` treats every annotated KO as fully belonging to every mapped set,
+  `split` divides each KO contribution across its memberships to avoid
+  over-counting broadly annotated KOs,
+  and `exclusive` keeps only uniquely assigned KOs.
+- If the question is "does the total RNA assigned to this module or pathway
+  change?", use `fitModuleMixedModel()` or `fitPathwayMixedModel()`.
+  Then choose `membershipMode = "duplicate"` if the target is total assigned
+  activity, or `membershipMode = "exclusive"` if only uniquely assigned genes
+  should contribute.
+  `split` is intentionally not offered here because these workflows fit
+  negative-binomial mixed models to counts, and splitting overlapping
+  assignments would create fractional pseudo-counts rather than observed
+  counts.
+- If the question is "does the same module or pathway respond differently
+  across genomes?", use `fitModuleRandomSlopeModel()` or
+  `fitPathwayRandomSlopeModel()` and then inspect the genome-specific
+  conditional effects with `moduleGenomeEffects()` or
+  `pathwayGenomeEffects()`.
+- If the question is "which genomes respond?", use `fitGenomeModel()`.
+- If the question is "do genomes in a clade or taxonomic group respond
+  coherently?", fit genomes first and then use
+  `fitGenomeGroupMetaAnalysis(..., group = "domain")` or another grouping
+  column from `genomeData(x)`.
+- If the question is "which individual genes change?", use `fitGeneModel()`.
+
+In practice, the KO meta-analysis route is the main higher-hierarchy option for
+KEGG-style annotations, because KO membership in modules and pathways is often
+many-to-many.
+
+By default, the modeling workflows use a library-size offset and, when
+`dna_genome_counts` is available in `genomeExperiment(x)`, a genome-abundance
+offset. Use `genomeOffset = FALSE` when you want to keep library-size
+normalization but disable genome-abundance normalization. In the KO/module/
+pathway mixed-model workflows, the genome random effect is still included when
+`genomeOffset = FALSE`.
+
+The mode choice matters because it changes the exact question being answered:
+
+- KO meta-analysis with `duplicate` asks whether the KOs annotated to a set,
+  taken at face value, show a coherent effect.
+- KO meta-analysis with `split` asks the same question while dividing each
+  KO's contribution across its memberships, reducing the influence of KOs that
+  participate in many sets.
+- KO meta-analysis with `exclusive` asks whether uniquely assigned KOs alone
+  support a set-level effect; this is the most specific and usually the most
+  conservative option.
+- Count reaggregation with `duplicate` asks whether total RNA assigned to a set
+  changes, even if some genes are shared with other sets.
+- Count reaggregation with `exclusive` asks whether the uniquely assigned part
+  of a set changes, avoiding duplicated counts entirely but potentially
+  discarding much of the data. There is no count-side `split` mode because the
+  current reaggregation workflow uses negative-binomial count models, and
+  splitting memberships would create fractional pseudo-counts.
 
 So the current position of MTTK is:
 
@@ -80,8 +161,13 @@ The current version already supports:
 
 - `MTTKExperiment` for explicit gene/genome data storage,
 - aggregation to genomes and annotation-linked groups,
-- KO-level mixed models with `glmmTMB`, where KO counts are modeled across
-  genomes with genome random effects,
+- KO-level mixed models with `glmmTMB`,
+- KO-level random-slope mixed models with KO-by-genome effect extraction,
+- module- and pathway-level KO meta-analysis built on KO effect sizes,
+- module- and pathway-level mixed models for total functional activity,
+- genome-level negative-binomial models,
+- genome-group meta-analysis across genome metadata columns such as domain or
+  clade,
 - gene-level negative-binomial models with optional parent-genome abundance
   offsets,
 - optional KEGG module annotation retrieval through `KEGGREST` for joining

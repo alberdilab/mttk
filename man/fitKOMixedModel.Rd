@@ -7,8 +7,9 @@
 fitKOMixedModel(
   x,
   variable,
-  model = c("library_only", "library_plus_genome_abundance"),
   assay = "rna_gene_counts",
+  libraryOffset = TRUE,
+  genomeOffset = NULL,
   libSize = NULL,
   genomeAssay = "dna_genome_counts",
   offsetPseudocount = 1,
@@ -21,16 +22,20 @@ fitKOMixedModel(
 \item{variable}{A single sample-level column name from \code{colData(x)}. The
 column must be numeric or a factor with exactly two levels.}
 
-\item{model}{Which of the two supported mixed-model specifications to fit.}
-
 \item{assay}{Gene-level assay name used as the RNA response.}
+
+\item{libraryOffset}{Logical; if \code{TRUE}, include \code{offset(log(lib_size))}.}
+
+\item{genomeOffset}{Logical; if \code{TRUE}, include
+\code{offset(log(genome_abundance + offsetPseudocount))}. If \code{NULL} (the
+default), MTTK uses genome-abundance normalization when \code{genomeAssay} is
+available in \code{genomeExperiment(x)}.}
 
 \item{libSize}{Library-size offset specification. Use \code{NULL} to compute
 \code{colSums(rnaGeneCounts(x))}, a single \code{colData(x)} column name, or a
 numeric vector with one value per sample.}
 
-\item{genomeAssay}{Genome-level assay used when
-\code{model = "library_plus_genome_abundance"}.}
+\item{genomeAssay}{Genome-level assay used when \code{genomeOffset = TRUE}.}
 
 \item{offsetPseudocount}{Non-negative pseudocount added to genome abundance
 before log-offset calculation.}
@@ -47,13 +52,11 @@ An \code{MTTKFit} with one row per KO.
 so the fitted model respects the nesting of genes within genomes.
 }
 \details{
-The first implementation supports two model specifications:
-\itemize{
-\item \code{"library_only"} fits
-\code{rna_count ~ variable + offset(log(lib_size)) + (1 | genome_id)}
-\item \code{"library_plus_genome_abundance"} fits
-\code{rna_count ~ variable + offset(log(lib_size)) + offset(log(genome_abundance + offsetPseudocount)) + (1 | genome_id)}
-}
+\code{libraryOffset} controls whether the model includes
+\code{offset(log(lib_size))}. \code{genomeOffset} controls whether the model includes
+\code{offset(log(genome_abundance + offsetPseudocount))}. The genome random
+effect \code{(1 | genome_id)} is part of this workflow regardless of the offset
+settings.
 
 This workflow is intended for KO-level differential expression or association
 analysis, where each KO can be observed in multiple genomes and the genome
@@ -64,8 +67,7 @@ if (requireNamespace("glmmTMB", quietly = TRUE)) {
     x <- makeExampleMTTKExperiment()
     fit <- fitKOMixedModel(x, variable = "condition")
     fit
-    fitInfo(fit)$effectLabel
-    as.data.frame(fit)[, c("ko_id", "effect_label", "estimate", "q_value")]
+    significantResults(fit)
 }
 
 }

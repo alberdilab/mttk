@@ -21,6 +21,7 @@ Description: MTTK helps users organize genome-resolved
 Depends:
     R (>= 4.3.0)
 Imports:
+    glmmTMB,
     methods,
     SingleCellExperiment,
     S4Vectors,
@@ -28,7 +29,6 @@ Imports:
     TreeSummarizedExperiment
 Suggests:
     BiocStyle,
-    glmmTMB,
     KEGGREST,
     knitr,
     rmarkdown,
@@ -46,11 +46,12 @@ Collate:
     'MTTKExperiment-accessors.R'
     'MTTKFit-class.R'
     'MTTKFit.R'
+    'MTTKFit-meta-analysis.R'
     'MTTKExperiment-analysis.R'
     'MTTKExperiment-modeling.R'
     'MTTKExample.R'
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.3.2
+RoxygenNote: 7.3.3
 Config/testthat/edition: 3
 biocViews: Software, Infrastructure, Sequencing, RNASeq, GeneExpression,
     DifferentialExpression, Metagenomics

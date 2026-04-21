@@ -1,428 +1,328 @@
 ---
-title: "MTTKExperiment Overview"
+title: "Using MTTK for Hierarchical Metatranscriptomics"
 author: "MTTK authors"
 package: MTTK
 output:
     rmarkdown::html_vignette:
         toc: true
 vignette: >
-    %\VignetteIndexEntry{MTTKExperiment Overview}
+    %\VignetteIndexEntry{Using MTTK for Hierarchical Metatranscriptomics}
     %\VignetteEngine{knitr::rmarkdown}
     %\VignetteEncoding{UTF-8}
 ---
 
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+library(MTTK)
 ```
 
 # Overview
 
-MTTK is designed for genome-resolved metatranscriptomics where features are not
-just a flat list of genes. Genes belong to genomes, genomes belong to a
-community, and genes may also participate in parallel annotation systems such as
-KEGG orthologs, modules, pathways, or learned co-expression modules.
+MTTK is designed for genome-resolved metatranscriptomics, where the analysis is
+not only about a flat gene-by-sample matrix.
 
-The first version of the package focuses on one main container:
-`MTTKExperiment`.
+In this setting:
 
-`MTTKExperiment` extends
-`TreeSummarizedExperiment::TreeSummarizedExperiment`, which means it inherits a
-well-established Bioconductor representation for assays, feature metadata,
-sample metadata, and optional trees.
+- genes are nested within genomes,
+- genome abundance can be measured separately from gene RNA,
+- genes can also be organized into functional hierarchies such as KO, module,
+  and pathway.
 
-# How MTTK differs from edgeR, DESeq2, and limma-voom
+This vignette uses a small synthetic coastal oxygen-pulse experiment to show
+how the same `MTTKExperiment` can support gene-, genome-, KO-, module-, and
+pathway-level questions.
 
-`edgeR`, `DESeq2`, and `limma-voom` are established Bioconductor workflows for
-differential expression on feature-by-sample expression matrices. They are
-especially strong when the main goal is to test each gene or transcript in a
-mostly flat experimental design.
+# The showcase dataset
 
-MTTK is not trying to replace those packages. Instead, it targets a different
-problem structure: genome-resolved metatranscriptomics, where genes are nested
-within genomes and gene-level RNA measurements may need to be interpreted
-alongside genome-level abundance data and functional hierarchies.
+The package ships two example objects:
 
-In practice, the main differences are:
-
-- MTTK stores gene-level RNA and genome-level measurements together in one
-  container instead of assuming a single flat feature space.
-- MTTK treats the gene-to-genome relationship as part of the core data model.
-- MTTK keeps annotation mappings such as gene-to-KO, KO-to-module, and
-  KO-to-pathway explicit so that aggregation and modeling can move across
-  levels.
-- The first MTTK modeling workflow is KO-level mixed modeling with
-  genome-aware random effects, which is a different target from standard
-  gene-wise differential expression.
-
-The modeling approach also differs.
-
-- `edgeR` usually fits one negative-binomial GLM per feature in a flat
-  feature-by-sample design.
-- `DESeq2` usually fits one negative-binomial GLM per feature in a flat
-  feature-by-sample design.
-- `limma-voom` transforms counts to log-expression with precision weights and
-  then fits weighted linear models per feature.
-- MTTK's first KO workflow fits one `glmmTMB` negative-binomial mixed model per
-  KO after aggregating genes to KO-within-genome counts, so the same KO can be
-  modeled across multiple genomes with `genome_id` as a random intercept.
-
-This changes the immediate interpretation:
-
-- standard RNA-seq workflows are typically centered on feature-wise
-  differential expression,
-- the first MTTK KO workflow is centered on function-level association across
-  genomes,
-- the gene-level workflow in MTTK is separate from that and is intended to
-  answer the different question of which individual genes change.
-
-So a useful way to think about the relationship is:
-
-- use `edgeR`, `DESeq2`, or `limma-voom` when the main task is standard
-  feature-level differential expression on a count matrix,
-- use MTTK when the main task depends on explicit nesting across gene, genome,
-  and functional levels,
-- use both together when needed, with MTTK handling the container and
-  hierarchy-aware summaries around more conventional differential-expression
-  engines.
-
-# Container design
-
-An `MTTKExperiment` stores information at several levels:
-
-- `geneExperiment(x)` names the gene-level layer of the object.
-- `geneAssays(x)` stores gene-level matrices such as RNA counts, normalized RNA
-  values, offsets, fitted values, or residuals.
-- `rowData(x)` stores feature-level metadata for genes or transcripts.
-  The column `rowData(x)$genome_id` is the authoritative gene-to-genome
-  mapping.
-- `colData(x)` stores sample-level metadata.
-- `genomeExperiment(x)` stores genome-level assays with one row per genome.
-- `genomeAssays(x)` stores the assay collection attached to
-  `genomeExperiment(x)`.
-- `genomeData(x)` stores the genome-level metadata attached to
-  `genomeExperiment(x)`.
-- `links(x)` stores explicit mapping tables such as gene-to-genome,
-  gene-to-annotation, or annotation-to-parent relationships.
-- `activeHierarchies(x)` records which hierarchies are currently active in a
-  given analysis context.
-- `rowTree(x)` and `rowLinks(x)` can store true tree-structured hierarchies when
-  a hierarchy is naturally represented as a tree.
-
-The important design choice in this version is that gene-level and genome-level
-measurements are stored separately:
-
-- `MTTKExperiment` itself is the gene-level experiment,
-- `geneExperiment(x)` and `geneAssays(x)` give that layer an explicit name,
-- genome-level assays live in `genomeExperiment(x)`,
-- the core gene-to-genome nesting lives in `rowData(x)$genome_id`,
-- explicit mapping tables and hierarchy labels remain easy to inspect through
-  `links(x)` and `activeHierarchies(x)`.
-
-This makes the common metatranscriptomic layout explicit: genes have RNA
-counts, aggregated genome RNA can be stored separately, genomes have DNA
-abundances, and genes are linked back to genomes.
-
-# Identifier contract
-
-MTTK now treats the row and column names of the core containers as canonical
-identifiers.
-
-- `rownames(x)` are the canonical gene identifiers,
-- `colnames(x)` are the canonical sample identifiers,
-- `rownames(genomeExperiment(x))` are the canonical genome identifiers.
-
-Metadata columns that mirror those identifiers are optional, but they must
-agree exactly when present:
-
-- `rowData(x)$gene_id` must match `rownames(x)`,
-- `colData(x)$sample_id` must match `colnames(x)`,
-- `genomeData(x)$genome_id` must match `rownames(genomeExperiment(x))`.
-
-This keeps downstream modeling and aggregation code anchored to one
-unambiguous set of gene, sample, and genome IDs.
-
-# Link table contract
-
-The first two columns of each table in `links(x)` are treated as the source and
-target identifier columns.
-
-- they should use explicit names ending in `_id`,
-- a source namespace such as `gene_id` or `genome_id` can resolve directly
-  against canonical IDs in the object,
-- a downstream source namespace such as `ko_id` or `module_id` must be
-  introduced as a target namespace by another link table,
-- `gene_to_genome` is the one special case: it is optional and, if stored, it
-  must mirror `rowData(x)$genome_id` exactly.
-
-This means that direct links such as `gene_to_ko`, `ko_to_module`, and
-`ko_to_pathway` can coexist with chained relationships such as
-`gene_to_ko -> ko_to_module -> module_to_pathway`. Direct KO-to-module and
-KO-to-pathway mappings are especially important because the same KO can
-participate in multiple modules and multiple pathways.
-
-# Current package structure
-
-At the moment the package is organized around a small number of source files:
-
-- `R/AllGenerics.R` defines the public accessor generics.
-- `R/MTTKExperiment-class.R` defines the S4 class and its validity method.
-- `R/MTTKExperiment.R` defines the constructor and display method.
-- `R/MTTKExperiment-accessors.R` defines the public accessors and replacement
-  methods.
-- `R/MTTKExperiment-analysis.R` defines the first aggregation and activity
-  helpers for running simple analyses on an `MTTKExperiment`.
-- `R/MTTKExperiment-utils.R` contains normalization and validation helpers used
-  internally by the package.
-
-This keeps the container layer small and easy to extend before modeling,
-network, and aggregation layers are added.
-
-# A small example
-
-The package includes both a ready-to-use example object and a helper function
-that constructs the same object from code.
+- `MTTKExample` is the smallest quick-start object and is mainly useful for
+  inspection and smoke tests.
+- `MTTKShowcase` is a richer object used here to demonstrate the main modeling
+  workflows on one compact dataset.
 
 ```{r}
-library(MTTK)
-x <- makeExampleMTTKExperiment()
+data("MTTKShowcase")
+x <- MTTKShowcase
 
 x
 ```
 
-The same object is also available as packaged data.
-
-```{r}
-data("MTTKExample")
-MTTKExample
-```
-
-# Working with accessors
-
-The package provides a small set of explicit accessors for the MTTK-specific
-parts of the object.
-
-```{r}
-geneExperiment(x)
-```
-
-```{r}
-genomeExperiment(x)
-```
-
-```{r}
-names(geneAssays(x))
-```
-
-```{r}
-names(genomeAssays(x))
-```
+The showcase object represents four genomes sampled across six incubations:
+three controls and three oxygen-pulse treatments.
 
 ```{r}
 genomeData(x)
 ```
 
+The container keeps gene-level RNA and genome-level data separate but linked:
+
 ```{r}
+names(geneAssays(x))
+names(genomeAssays(x))
 names(links(x))
 ```
 
-```{r}
-activeHierarchies(x)
-```
+The main assay-level accessors are:
 
 ```{r}
-rnaGeneCounts(x)
-```
-
-```{r}
+rnaGeneCounts(x)[1:4, 1:4]
+rnaGenomeCounts(x)
 dnaGenomeCounts(x)
 ```
 
-Assay convenience accessors follow a fixed naming convention:
+# Choosing a model
 
-- `rnaGeneCounts(x)` reads or sets the gene-level assay named
-  `"rna_gene_counts"`.
-- `rnaGenomeCounts(x)` reads or sets the genome-level assay named
-  `"rna_genome_counts"`.
-- `dnaGenomeCounts(x)` reads or sets the genome-level assay named
-  `"dna_genome_counts"`.
+The most useful way to approach MTTK is to start from the biological question.
 
-# Running simple analyses
+- Use `fitGeneModel()` when the question is "which individual genes change?"
+- Use `fitGenomeModel()` when the question is "which genomes shift overall
+  transcription?"
+- Use `fitGenomeGroupMetaAnalysis()` when the question is "do genomes from the
+  same clade or domain respond coherently?"
+- Use `fitKOMixedModel()` when the question is "which functions, represented as
+  KOs, respond across genomes?"
+- Use `fitKORandomSlopeModel()` when the question is "does the same KO behave
+  differently in different genomes?"
+- Use `fitKOGenomeGroupMetaAnalysis()` and `compareKOGenomeGroups()` when the
+  question is "within or between clades, do KO responses differ?"
+- Use `fitModuleMetaAnalysis()` or `fitPathwayMetaAnalysis()` when the question
+  is "do the KOs assigned to this higher-level function show a coherent
+  response?"
+- Use `fitModuleMixedModel()` or `fitPathwayMixedModel()` when the question is
+  "does total module/pathway activity change?"
+- Use `fitModuleRandomSlopeModel()` or `fitPathwayRandomSlopeModel()` when the
+  question is "does the same module/pathway respond differently in different
+  genomes?"
 
-The first analysis helpers focus on transparent summaries that work directly
-with explicit link tables.
+The important distinction is between:
 
-Genome-level aggregation of gene-level RNA. The resulting assay is renamed to
-`"rna_genome_counts"` so it is easy to distinguish from stored gene-level RNA.
+- effect-size synthesis upward from KO results, and
+- re-aggregating counts and refitting a model at a higher level.
 
-```{r}
-genome_rna <- aggregateToGenome(x)
-genome_rna
-```
+Those answer different questions and should be chosen deliberately.
 
-Aggregation through a multi-step functional path:
+# Question 1: Which genes change?
 
-```{r}
-module_counts <- aggregateByLink(
-    x,
-    path = c("gene_to_ko", "ko_to_module"),
-    assays = "rna_gene_counts"
-)
-
-module_counts
-```
-
-Gene- and genome-level RNA-over-DNA activity summaries:
-
-```{r}
-gene_activity <- summarizeActivity(x, by = "gene")
-genome_activity <- summarizeActivity(x, by = "genome")
-
-gene_activity
-genome_activity
-```
-
-These helpers currently return `SummarizedExperiment` objects rather than a new
-`MTTKExperiment`, because the aggregated features are no longer genes and the
-appropriate hierarchy metadata may differ from the original object.
-
-# KO-level mixed models
-
-The first hierarchy-aware modeling workflow in MTTK fits one mixed model per
-KO. Gene-level RNA counts are first aggregated to KO-within-genome
-observations, and the model is then fit with `glmmTMB`.
-
-The first implementation supports two model specifications:
-
-- `model = "library_only"` uses
-  `rna_count ~ variable + offset(log(lib_size)) + (1 | genome_id)`
-- `model = "library_plus_genome_abundance"` adds a genome-abundance offset
-
-The same workflow can be inspected in two explicit preparation steps before the
-model is fit:
-
-```{r}
-ko_genome <- aggregateToKOGenome(x)
-ko_genome
-SummarizedExperiment::rowData(ko_genome)[, c("ko_id", "genome_id", "n_genes_pair")]
-
-ko_model_data <- makeKOMixedModelData(x, variable = "condition")
-head(as.data.frame(ko_model_data))
-S4Vectors::metadata(ko_model_data)$mttk_ko_model$effectLabel
-```
-
-```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
-ko_fit <- fitKOMixedModel(x, variable = "condition")
-ko_fit
-fitInfo(ko_fit)$effectLabel
-as.data.frame(ko_fit)[, c("ko_id", "effect_label", "estimate", "q_value", "status")]
-```
-
-The resulting `MTTKFit` can then be ranked, filtered, and annotated:
-
-```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
-fitTable(ko_fit, sortBy = "q_value")
-significantResults(ko_fit)
-annotateKOFit(ko_fit, x)
-```
-
-If `KEGGREST` is available, `module_id` values can also be accompanied by
-module names, classes, and definitions retrieved directly from the KEGG module
-database.
-
-```{r eval = FALSE}
-module_table <- fetchKEGGModuleTable(c("M00001", "M00002"))
-annotateKOFit(ko_fit, x, moduleTable = module_table)
-```
-
-This workflow is aimed at KO-level differential expression or association
-analysis, where each KO may be observed in multiple genomes and the genome term
-should be modeled explicitly as a random intercept.
-
-# Gene-level models
-
-MTTK now also provides a separate gene-level workflow for the different
-question of which individual genes change across samples.
-
-This workflow does not use a genome random effect, because each gene belongs to
-one fixed parent genome. Instead, the genome-aware part enters through an
-optional genome-abundance offset.
-
-The first implementation supports two model specifications:
-
-- `model = "library_only"` uses
-  `rna_count ~ variable + offset(log(lib_size))`
-- `model = "library_plus_genome_abundance"` adds
-  `offset(log(genome_abundance + offsetPseudocount))`
-
-The corresponding model table can be inspected explicitly:
-
-```{r}
-gene_model_data <- makeGeneModelData(x, variable = "condition")
-head(as.data.frame(gene_model_data))
-S4Vectors::metadata(gene_model_data)$mttk_gene_model$effectLabel
-```
+Suppose you want to identify genes whose RNA abundance shifts between control
+and oxygen-pulse incubations, while optionally normalizing by parent-genome
+abundance.
 
 ```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
 gene_fit <- fitGeneModel(x, variable = "condition")
-gene_fit
-fitInfo(gene_fit)$effectLabel
-as.data.frame(gene_fit)[, c("gene_id", "genome_id", "effect_label", "estimate", "q_value", "status")]
+fitTable(gene_fit, sortBy = "q_value", n = 8)
 ```
 
-This is the workflow to use when the target of inference is the individual
-gene, rather than a function aggregated across genomes.
+This is the most direct workflow when the target of inference is the individual
+gene.
 
-# Subsetting behavior
+# Question 2: Which genomes shift overall activity?
 
-`MTTKExperiment` now defines explicit subsetting behavior for the nested
-gene/genome layout.
+Now suppose the question moves from genes to genomes: which MAGs show an
+overall transcriptional response after accounting for library size and genome
+abundance?
 
-- row subsetting keeps the selected genes,
-- the genome-level companion experiment is pruned to the genomes still
-  referenced by `rowData(x)$genome_id`,
-- dependent link tables are pruned to identifiers that remain reachable from
-  the retained genes,
-- column subsetting narrows both the gene-level and genome-level assays to the
-  selected samples.
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+genome_fit <- fitGenomeModel(x, variable = "condition")
+fitTable(genome_fit, sortBy = "q_value")
+```
 
-This keeps ordinary `x[i, j]` operations consistent with the biological nesting
-stored in the object.
+If the next question is whether broader groups of genomes respond coherently,
+the genome-level results can be summarized by a grouping column in
+`genomeData(x)`.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+genome_domain_fit <- fitGenomeGroupMetaAnalysis(genome_fit, x, group = "domain")
+genome_domain_fit
+```
+
+This is useful for questions such as "do archaeal MAGs tend to respond
+similarly?" even when the individual genomes are not identical in magnitude.
+
+# Question 3: Which KOs respond across genomes?
+
+KO-level modeling is the main function-centered workflow in MTTK. Gene-level
+RNA is first aggregated to KO-within-genome observations, then modeled with a
+negative-binomial mixed model.
+
+In a real study, this is the right question when you care about conserved
+functions such as stress response, respiration, or nitrogen metabolism across
+many genomes at once.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+ko_fit <- fitKOMixedModel(x, variable = "condition")
+fitTable(annotateKOFit(ko_fit, x), sortBy = "q_value")
+```
+
+Here the mixed model uses `genome_id` as a random intercept, so the same KO can
+be modeled across multiple parent genomes.
+
+# Question 4: Does the same KO behave differently in different genomes?
+
+Some functions are conserved, but their regulation is not. A KO random-slope
+model asks whether the KO-level response varies among genomes rather than
+assuming one common genome effect.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+ko_rs_fit <- fitKORandomSlopeModel(x, variable = "condition", genomeOffset = FALSE)
+fitTable(ko_rs_fit, sortBy = "q_value")
+```
+
+The genome-specific conditional KO effects can then be inspected directly.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+ko_genome <- koGenomeEffects(ko_rs_fit)
+ko_genome[ko_genome$ko_id == "K10002", c("ko_id", "genome_id", "conditional_effect_estimate")]
+```
+
+That is the right follow-up when the question is something like:
+"does the same stress-response KO increase in bacteria but decrease in
+archaea?"
+
+## Summarizing KO responses within genome groups
+
+If you want to ask whether genomes in the same domain or clade show a coherent
+response for a KO, summarize the KO genome effects by a genome grouping
+variable.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+ko_domain_fit <- fitKOGenomeGroupMetaAnalysis(ko_rs_fit, x, group = "domain")
+fitTable(ko_domain_fit, sortBy = "q_value")
+```
+
+This workflow meta-analyzes the genome-specific KO effects within each group.
+
+## Comparing KO responses between genome groups
+
+If the question is not only whether a KO is coherent within a group, but
+whether the KO response differs between groups, compare the grouped KO results
+directly.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+compareKOGenomeGroups(
+    ko_domain_fit,
+    reference = "Bacteria",
+    contrast = "Archaea"
+)
+```
+
+This is especially useful for questions such as "is this KO more strongly
+induced in archaea than in bacteria?"
+
+# Question 5: Do higher-level functions show coherent KO-level responses?
+
+When a module or pathway contains several KOs, one useful question is whether
+the KO-level responses within that set are moving in a coherent direction.
+
+That is what the module/pathway meta-analysis layer is for.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+module_meta <- fitModuleMetaAnalysis(ko_fit, x)
+pathway_meta <- fitPathwayMetaAnalysis(ko_fit, x)
+
+fitTable(module_meta, sortBy = "q_value")
+fitTable(pathway_meta, sortBy = "q_value")
+```
+
+This is a good choice when you want to keep KO-level modeling as the primary
+inferential layer and summarize upward afterward.
+
+## Choosing a membership mode for meta-analysis
+
+KO-to-module and KO-to-pathway mappings can be many-to-many, so MTTK lets you
+choose how overlapping memberships are handled.
+
+- `duplicate`: every KO contributes fully to every mapped set.
+- `split`: a KO contribution is divided across its memberships.
+- `exclusive`: only uniquely assigned KOs are kept.
+
+For overlapping functional annotations, `split` is often the most conservative
+default when you want to reduce the influence of broadly annotated KOs.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+fitModuleMetaAnalysis(ko_fit, x, membershipMode = "split")
+```
+
+# Question 6: Does total module or pathway activity change?
+
+Sometimes the target is not coherence of KO effects, but total RNA assigned to
+a higher-level function. In that case the right workflow is to re-aggregate the
+counts and refit the mixed model at the module or pathway level.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+module_fit <- fitModuleMixedModel(x, variable = "condition")
+pathway_fit <- fitPathwayMixedModel(x, variable = "condition")
+
+fitTable(module_fit, sortBy = "q_value")
+fitTable(pathway_fit, sortBy = "q_value")
+```
+
+This answers a different question from `fitModuleMetaAnalysis()` and
+`fitPathwayMetaAnalysis()`.
+
+For count reaggregation, MTTK supports:
+
+- `duplicate` for total assigned activity,
+- `exclusive` for uniquely assigned activity only.
+
+There is no count-side `split` mode, because these workflows fit count models,
+and splitting memberships would create fractional pseudo-counts instead of
+observed counts.
+
+# Question 7: Do modules or pathways respond differently across genomes?
+
+The random-slope module/pathway workflows extend the total-activity model to
+allow genome-specific responses.
+
+These are useful when the biological question is:
+"does the same pathway increase in some genomes but not in others?"
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+module_rs_fit <- fitModuleRandomSlopeModel(x, variable = "condition", genomeOffset = FALSE)
+pathway_rs_fit <- fitPathwayRandomSlopeModel(x, variable = "condition", genomeOffset = FALSE)
+
+fitTable(module_rs_fit, sortBy = "q_value")
+fitTable(pathway_rs_fit, sortBy = "q_value")
+```
+
+The genome-specific conditional effects can be extracted just as for KO
+random-slope models.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+moduleGenomeEffects(module_rs_fit)
+pathwayGenomeEffects(pathway_rs_fit)
+```
+
+# Transparent aggregation helpers
+
+MTTK also includes explicit aggregation helpers for users who want to inspect
+the intermediate summarized data before fitting a model.
 
 ```{r}
-x_small <- x[1:2, 1:2]
-x_small
-names(links(x_small))
-genomeData(x_small)
+aggregateToGenome(x)
+aggregateToKOGenome(x)
+aggregateByLink(x, path = c("gene_to_ko", "ko_to_module"), assays = "rna_gene_counts")
 ```
 
-# What is explicit in the first version
+These helpers return `SummarizedExperiment` objects, which makes the
+intermediate data easy to inspect and reuse in custom workflows.
 
-The current package version deliberately keeps link tables explicit and
-inspectable. It does not yet impose a rigid schema for every mapping table, and
-it does not yet automatically reinterpret arbitrary mapping tables during
-subsetting. The one exception is the core biological nesting of genes within
-genomes, which is defined directly by `rowData(x)$genome_id`. A stored
-`gene_to_genome` link is therefore optional and, when present, must mirror that
-column exactly. Broader link-handling rules can be tightened later once the
-remaining link schemas are stabilized.
+# Summary
 
-This conservative design keeps the first implementation predictable:
+The same `MTTKExperiment` can support several distinct biological questions:
 
-- the gene-level and genome-level layers are both explicitly named,
-- gene-level assays live in the main Bioconductor assay storage,
-- genome-level assays live in `genomeExperiment(x)`,
-- sample and feature metadata stay in standard Bioconductor slots,
-- genome-level metadata and mapping tables remain easy to inspect,
-- explicit assay names distinguish `rnaGeneCounts`, `rnaGenomeCounts`, and
-  `dnaGenomeCounts`,
-- future modeling and network layers can build on the same container without
-  changing the basic object layout.
+- which genes change,
+- which genomes respond,
+- which KOs respond across genomes,
+- whether KO responses vary among genomes,
+- whether clades differ in KO behavior,
+- whether higher-level functions show coherent KO responses,
+- whether total module/pathway activity shifts,
+- whether higher-level functional responses vary among genomes.
 
-# Next steps
+The key is to pick the workflow that matches the question:
 
-The next implementation layers are expected to add:
-
-- helper utilities for common link schemas,
-- model-fitting interfaces,
-- aggregation and summarization helpers,
-- network and module-oriented analysis classes.
+- use KO/meta-analysis workflows for coherent function-level synthesis,
+- use re-aggregated count models for total activity,
+- use random-slope models when genome-specific heterogeneity is part of the
+  biological signal rather than noise to average away.
