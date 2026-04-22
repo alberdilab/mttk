@@ -284,7 +284,8 @@
     statistic_col <- intersect(colnames(coefficient_table), c("z value", "t value"))[1L]
     p_value_col <- grep("^Pr\\(", colnames(coefficient_table), value = TRUE)[1L]
     tested_row <- coefficient_table[tested_term, , drop = FALSE]
-    intercept_row <- coefficient_table["(Intercept)", , drop = FALSE]
+    has_intercept <- "(Intercept)" %in% rownames(coefficient_table)
+    intercept_row <- if (has_intercept) coefficient_table["(Intercept)", , drop = FALSE] else NULL
     term_info <- .resolved_term_info(variable_info$modelSpec, tested_term = tested_term)
 
     row$tested_term <- tested_term
@@ -296,8 +297,8 @@
     row$std_error <- as.numeric(tested_row[, "Std. Error"])
     row$statistic <- as.numeric(tested_row[, statistic_col])
     row$p_value <- as.numeric(tested_row[, p_value_col])
-    row$intercept_estimate <- as.numeric(intercept_row[, "Estimate"])
-    row$intercept_std_error <- as.numeric(intercept_row[, "Std. Error"])
+    row$intercept_estimate <- if (!is.null(intercept_row)) as.numeric(intercept_row[, "Estimate"]) else NA_real_
+    row$intercept_std_error <- if (!is.null(intercept_row)) as.numeric(intercept_row[, "Std. Error"]) else NA_real_
     row$AIC <- stats::AIC(fit)
     row$BIC <- stats::BIC(fit)
     row$logLik <- as.numeric(stats::logLik(fit))

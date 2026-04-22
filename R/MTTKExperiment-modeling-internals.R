@@ -1,77 +1,3 @@
-.normalize_ko_model_variable <- function(x, variable) {
-    if (!is.character(variable) || length(variable) != 1L || is.na(variable) || variable == "") {
-        stop("'variable' must be a single non-empty column name from colData(x).", call. = FALSE)
-    }
-
-    sample_data <- SummarizedExperiment::colData(x)
-    if (!(variable %in% names(sample_data))) {
-        stop("Unknown sample-level variable: ", variable, ".", call. = FALSE)
-    }
-
-    values <- sample_data[[variable]]
-    sample_ids <- colnames(x)
-
-    if (is.character(values)) {
-        values <- factor(values, levels = unique(values))
-    }
-
-    if (is.factor(values)) {
-        values <- droplevels(values)
-        n <- nlevels(values)
-
-        if (n < 2L) {
-            stop(
-                "'variable' must refer to a factor with at least two levels.",
-                call. = FALSE
-            )
-        }
-
-        reference_level <- levels(values)[1L]
-
-        if (n == 2L) {
-            contrast_level <- levels(values)[2L]
-            effect_label <- paste0(variable, ": ", contrast_level, " vs ", reference_level)
-            variable_type <- "two_level_factor"
-        } else {
-            contrast_level <- NA_character_
-            effect_label <- paste0(variable, ": contrasts vs ", reference_level)
-            variable_type <- "multi_level_factor"
-        }
-    } else if (is.numeric(values) || is.integer(values)) {
-        values <- as.numeric(values)
-
-        if (length(unique(values)) < 2L) {
-            stop(
-                "'variable' must vary across samples before the model can be fit.",
-                call. = FALSE
-            )
-        }
-
-        reference_level <- NA_character_
-        contrast_level <- NA_character_
-        effect_label <- paste0(variable, " per unit increase")
-        variable_type <- "numeric"
-    } else {
-        stop(
-            "'variable' must refer to a numeric column or a factor/character column.",
-            call. = FALSE
-        )
-    }
-
-    if (anyNA(values)) {
-        stop("'variable' must not contain missing values.", call. = FALSE)
-    }
-
-    list(
-        name = variable,
-        values = stats::setNames(values, sample_ids),
-        type = variable_type,
-        referenceLevel = reference_level,
-        contrastLevel = contrast_level,
-        effectLabel = effect_label
-    )
-}
-
 .normalize_lib_size_values <- function(sample_data, sample_ids, default_values, default_label, libSize) {
     if (is.null(libSize)) {
         values <- as.numeric(default_values)
@@ -113,9 +39,6 @@
     )
 }
 
-.normalize_model_variable <- .normalize_ko_model_variable
-.normalize_model_lib_size <- .normalize_ko_model_lib_size
-
 .normalize_reference_levels <- function(referenceLevels) {
     if (is.null(referenceLevels)) {
         return(list())
@@ -147,7 +70,7 @@
     normalized
 }
 
-.coerce_model_column <- function(values, column_name, reference_level = NULL, require_binary_factor = FALSE) {
+.coerce_model_column <- function(values, column_name, reference_level = NULL) {
     if (is.character(values)) {
         values <- factor(values, levels = unique(values))
     } else if (is.logical(values)) {
@@ -210,8 +133,7 @@
 .model_sample_frame <- function(
     x,
     variables,
-    referenceLevels = NULL,
-    require_binary_variables = character()
+    referenceLevels = NULL
 ) {
     sample_data <- as.data.frame(
         SummarizedExperiment::colData(x),
@@ -242,8 +164,7 @@
         frame[[variable]] <- .coerce_model_column(
             values = frame[[variable]],
             column_name = variable,
-            reference_level = reference_levels[[variable]],
-            require_binary_factor = variable %in% require_binary_variables
+            reference_level = reference_levels[[variable]]
         )
     }
 
@@ -1154,7 +1075,8 @@
     statistic_col <- intersect(colnames(coefficient_table), c("z value", "t value"))[1L]
     p_value_col <- grep("^Pr\\(", colnames(coefficient_table), value = TRUE)[1L]
     tested_row <- coefficient_table[interaction_term$interactionTerm, , drop = FALSE]
-    intercept_row <- coefficient_table["(Intercept)", , drop = FALSE]
+    has_intercept <- "(Intercept)" %in% rownames(coefficient_table)
+    intercept_row <- if (has_intercept) coefficient_table["(Intercept)", , drop = FALSE] else NULL
     row$base_tested_term <- interaction_term$baseTerm
     row$tested_term <- interaction_term$interactionTerm
     row$group_term <- interaction_term$groupTerm
@@ -1162,8 +1084,8 @@
     row$std_error <- as.numeric(tested_row[, "Std. Error"])
     row$statistic <- as.numeric(tested_row[, statistic_col])
     row$p_value <- as.numeric(tested_row[, p_value_col])
-    row$intercept_estimate <- as.numeric(intercept_row[, "Estimate"])
-    row$intercept_std_error <- as.numeric(intercept_row[, "Std. Error"])
+    row$intercept_estimate <- if (!is.null(intercept_row)) as.numeric(intercept_row[, "Estimate"]) else NA_real_
+    row$intercept_std_error <- if (!is.null(intercept_row)) as.numeric(intercept_row[, "Std. Error"]) else NA_real_
     row$AIC <- stats::AIC(fit)
     row$BIC <- stats::BIC(fit)
     row$logLik <- as.numeric(stats::logLik(fit))
@@ -2311,7 +2233,8 @@
     statistic_col <- intersect(colnames(coefficient_table), c("z value", "t value"))[1L]
     p_value_col <- grep("^Pr\\(", colnames(coefficient_table), value = TRUE)[1L]
     tested_row <- coefficient_table[tested_term, , drop = FALSE]
-    intercept_row <- coefficient_table["(Intercept)", , drop = FALSE]
+    has_intercept <- "(Intercept)" %in% rownames(coefficient_table)
+    intercept_row <- if (has_intercept) coefficient_table["(Intercept)", , drop = FALSE] else NULL
     term_info <- .resolved_term_info(model_spec, tested_term = tested_term)
 
     row$tested_term <- tested_term
@@ -2323,8 +2246,8 @@
     row$std_error <- as.numeric(tested_row[, "Std. Error"])
     row$statistic <- as.numeric(tested_row[, statistic_col])
     row$p_value <- as.numeric(tested_row[, p_value_col])
-    row$intercept_estimate <- as.numeric(intercept_row[, "Estimate"])
-    row$intercept_std_error <- as.numeric(intercept_row[, "Std. Error"])
+    row$intercept_estimate <- if (!is.null(intercept_row)) as.numeric(intercept_row[, "Estimate"]) else NA_real_
+    row$intercept_std_error <- if (!is.null(intercept_row)) as.numeric(intercept_row[, "Std. Error"]) else NA_real_
     row$AIC <- stats::AIC(fit)
     row$BIC <- stats::BIC(fit)
     row$logLik <- as.numeric(stats::logLik(fit))
@@ -2468,7 +2391,8 @@
     statistic_col <- intersect(colnames(coefficient_table), c("z value", "t value"))[1L]
     p_value_col <- grep("^Pr\\(", colnames(coefficient_table), value = TRUE)[1L]
     tested_row <- coefficient_table[tested_term, , drop = FALSE]
-    intercept_row <- coefficient_table["(Intercept)", , drop = FALSE]
+    has_intercept <- "(Intercept)" %in% rownames(coefficient_table)
+    intercept_row <- if (has_intercept) coefficient_table["(Intercept)", , drop = FALSE] else NULL
     variance_summary <- .extract_glmmtmb_group_variance(
         fit = fit,
         group_name = "genome_id",
@@ -2481,7 +2405,7 @@
         group_name = "genome_id",
         tested_term = tested_term,
         effect_label = .resolved_term_info(model_spec, tested_term)$effectLabel,
-        fixed_intercept = as.numeric(intercept_row[, "Estimate"]),
+        fixed_intercept = if (!is.null(intercept_row)) as.numeric(intercept_row[, "Estimate"]) else NA_real_,
         fixed_effect = as.numeric(tested_row[, "Estimate"])
     )
     term_info <- .resolved_term_info(model_spec, tested_term = tested_term)
@@ -2495,8 +2419,8 @@
     row$std_error <- as.numeric(tested_row[, "Std. Error"])
     row$statistic <- as.numeric(tested_row[, statistic_col])
     row$p_value <- as.numeric(tested_row[, p_value_col])
-    row$intercept_estimate <- as.numeric(intercept_row[, "Estimate"])
-    row$intercept_std_error <- as.numeric(intercept_row[, "Std. Error"])
+    row$intercept_estimate <- if (!is.null(intercept_row)) as.numeric(intercept_row[, "Estimate"]) else NA_real_
+    row$intercept_std_error <- if (!is.null(intercept_row)) as.numeric(intercept_row[, "Std. Error"]) else NA_real_
     row$genome_intercept_sd <- variance_summary$intercept_sd
     row$genome_slope_sd <- variance_summary$slope_sd
     row$genome_intercept_slope_cor <- variance_summary$intercept_slope_cor

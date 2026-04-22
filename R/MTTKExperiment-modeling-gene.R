@@ -231,7 +231,8 @@
     statistic_col <- intersect(colnames(coefficient_table), c("z value", "t value"))[1L]
     p_value_col <- grep("^Pr\\(", colnames(coefficient_table), value = TRUE)[1L]
     tested_row <- coefficient_table[tested_term, , drop = FALSE]
-    intercept_row <- coefficient_table["(Intercept)", , drop = FALSE]
+    has_intercept <- "(Intercept)" %in% rownames(coefficient_table)
+    intercept_row <- if (has_intercept) coefficient_table["(Intercept)", , drop = FALSE] else NULL
     term_info <- .resolved_term_info(variable_info$modelSpec, tested_term = tested_term)
 
     row$tested_term <- tested_term
@@ -243,8 +244,8 @@
     row$std_error <- as.numeric(tested_row[, "Std. Error"])
     row$statistic <- as.numeric(tested_row[, statistic_col])
     row$p_value <- as.numeric(tested_row[, p_value_col])
-    row$intercept_estimate <- as.numeric(intercept_row[, "Estimate"])
-    row$intercept_std_error <- as.numeric(intercept_row[, "Std. Error"])
+    row$intercept_estimate <- if (!is.null(intercept_row)) as.numeric(intercept_row[, "Estimate"]) else NA_real_
+    row$intercept_std_error <- if (!is.null(intercept_row)) as.numeric(intercept_row[, "Std. Error"]) else NA_real_
     row$AIC <- stats::AIC(fit)
     row$BIC <- stats::BIC(fit)
     row$logLik <- as.numeric(stats::logLik(fit))
@@ -521,7 +522,7 @@ fitGeneModel <- function(
 
     results <- do.call(
         rbind,
-        lapply(fitted_rows, function(x) x$result)
+        lapply(fitted_rows, function(one_fit) one_fit$result)
     )
     rownames(results) <- gene_ids
 
@@ -531,7 +532,7 @@ fitGeneModel <- function(
 
     stored_models <- if (keepFits) {
         stats::setNames(
-            lapply(fitted_rows, function(x) x$model),
+            lapply(fitted_rows, function(one_fit) one_fit$model),
             gene_ids
         )
     } else {
@@ -546,6 +547,8 @@ fitGeneModel <- function(
     info <- list(
         backend = "glmmTMB",
         model = "gene_model",
+        featureType = "gene",
+        featureIdColumn = "gene_id",
         variable = model_state$variable,
         variableType = model_state$variableType,
         referenceLevel = model_state$referenceLevel,
@@ -559,6 +562,8 @@ fitGeneModel <- function(
         libraryOffset = model_state$libraryOffset,
         genomeOffset = model_state$genomeOffset,
         responseAssay = assay_name,
+        sourceAssay = model_state$sourceAssay,
+        sourceLevel = "gene",
         libSizeSource = model_state$libSizeSource,
         genomeAssay = genome_assay,
         offsetPseudocount = model_state$offsetPseudocount,
