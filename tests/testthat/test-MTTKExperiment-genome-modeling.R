@@ -44,6 +44,33 @@ test_that("makeGenomeModelData aggregates gene RNA to genomes by default", {
     expect_equal(one_row$genome_abundance_offset, one_row$genome_abundance + 1)
 })
 
+test_that("genome-level workflows can include a repeated-measures sample block", {
+    x <- makeShowcaseMTTKExperiment()
+    model_data <- makeGenomeModelData(
+        x,
+        variable = "condition",
+        sampleBlock = "station_id",
+        genomeOffset = FALSE
+    )
+
+    expect_true("sample_block" %in% names(model_data))
+    expect_identical(
+        S4Vectors::metadata(model_data)$mttk_genome_model$sampleBlock,
+        "station_id"
+    )
+
+    skip_if_not_installed("glmmTMB")
+    fit <- fitGenomeModel(
+        x,
+        variable = "condition",
+        sampleBlock = "station_id",
+        genomeOffset = FALSE
+    )
+
+    expect_identical(fitInfo(fit)$sampleBlock, "station_id")
+    expect_identical(fitInfo(fit)$randomEffects, "sample_block_random_intercept")
+})
+
 test_that("genome-level workflows support formulas with explicit tested terms", {
     skip_if_not_installed("glmmTMB")
 

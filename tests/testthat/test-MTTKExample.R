@@ -31,6 +31,7 @@ test_that("the packaged example object is available and reproducible", {
     expect_s3_class(genomeTree(MTTKExample), "phylo")
     expect_identical(sort(genomeTree(MTTKExample)$tip.label), c("genome_1", "genome_2", "genome_3"))
     expect_identical(dim(dnaGenomeCounts(MTTKExample)), c(3L, 4L))
+    expect_true("station_id" %in% names(SummarizedExperiment::colData(MTTKExample)))
     expect_identical(S4Vectors::metadata(MTTKExample)$study_name,
         "Synthetic genome-resolved metatranscriptomics example"
     )
@@ -60,6 +61,7 @@ test_that("the packaged showcase object is available and reproducible", {
     expect_identical(sort(genomeTree(MTTKShowcase)$tip.label), c("genome_1", "genome_2", "genome_3", "genome_4"))
     expect_identical(dim(rnaGenomeCounts(MTTKShowcase)), c(4L, 6L))
     expect_identical(dim(dnaGenomeCounts(MTTKShowcase)), c(4L, 6L))
+    expect_true("station_id" %in% names(SummarizedExperiment::colData(MTTKShowcase)))
     domain_table <- table(as.character(genomeData(MTTKShowcase)$domain))
     expect_identical(names(domain_table), c("Archaea", "Bacteria"))
     expect_identical(as.integer(domain_table), c(2L, 2L))

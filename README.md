@@ -76,6 +76,10 @@ Most modeling functions in MTTK support two user-facing interfaces:
 - `formula = ~ condition + pH` plus `term = "condition"` when you want to
   adjust for additional sample covariates but still test one focal effect
 
+The same workflows can also account for repeated measures or paired samples
+with `sampleBlock = "station_id"` or another blocking column from
+`colData(x)`.
+
 ## Choosing An Analysis
 
 The higher-level question matters, because MTTK currently supports two
@@ -83,6 +87,9 @@ different module/pathway workflows.
 
 - If the question is "which individual KOs are associated with the variable?",
   use `fitKOMixedModel()`.
+  If closely related genomes are expected to share baseline KO activity, set
+  `genomeCorrelation = "brownian"` to replace the independent genome random
+  intercept with a Brownian phylogenetic covariance term from `genomeTree(x)`.
 - If the question is "does the same KO respond differently across genomes?",
   use `fitKORandomSlopeModel()` and then inspect the genome-specific KO effects
   with `koGenomeEffects()`.
@@ -113,6 +120,9 @@ different module/pathway workflows.
   Then choose `membershipMode = "duplicate"` if the target is total assigned
   activity, or `membershipMode = "exclusive"` if only uniquely assigned genes
   should contribute.
+  If the genomes are phylogenetically structured, set
+  `genomeCorrelation = "brownian"` to model Brownian covariance among genomes
+  directly in the count model.
   `split` is intentionally not offered here because these workflows fit
   negative-binomial mixed models to counts, and splitting overlapping
   assignments would create fractional pseudo-counts rather than observed

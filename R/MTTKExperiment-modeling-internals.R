@@ -256,6 +256,210 @@
     frame
 }
 
+.normalize_sample_block_spec <- function(x, sampleBlock, fixed_variables = character()) {
+    if (is.null(sampleBlock)) {
+        return(list(
+            name = NA_character_,
+            values = NULL
+        ))
+    }
+
+    if (!is.character(sampleBlock) ||
+        length(sampleBlock) != 1L ||
+        is.na(sampleBlock) ||
+        sampleBlock == "") {
+        stop(
+            "'sampleBlock' must be NULL or a single non-empty column name from colData(x).",
+            call. = FALSE
+        )
+    }
+
+    if (sampleBlock %in% fixed_variables) {
+        stop(
+            "The sample-block variable '",
+            sampleBlock,
+            "' must not also be included among the fixed-effect variables.",
+            call. = FALSE
+        )
+    }
+
+    sample_data <- as.data.frame(
+        SummarizedExperiment::colData(x),
+        stringsAsFactors = FALSE
+    )
+    if (!(sampleBlock %in% names(sample_data))) {
+        stop("Unknown sample-level block variable: ", sampleBlock, ".", call. = FALSE)
+    }
+
+    values <- sample_data[[sampleBlock]]
+    if (is.factor(values)) {
+        values <- droplevels(values)
+    } else if (is.character(values) || is.logical(values) || is.numeric(values) || is.integer(values)) {
+        values <- factor(as.character(values), levels = unique(as.character(values)))
+    } else {
+        stop(
+            "The sample-block variable '",
+            sampleBlock,
+            "' must be character, factor, logical, integer, or numeric.",
+            call. = FALSE
+        )
+    }
+
+    if (anyNA(values) || any(levels(values) == "")) {
+        stop(
+            "The sample-block variable '",
+            sampleBlock,
+            "' must not contain missing or empty values.",
+            call. = FALSE
+        )
+    }
+
+    if (nlevels(values) < 2L) {
+        stop(
+            "The sample-block variable '",
+            sampleBlock,
+            "' must contain at least two levels.",
+            call. = FALSE
+        )
+    }
+
+    if (!any(table(values) > 1L)) {
+        stop(
+            "The sample-block variable '",
+            sampleBlock,
+            "' must repeat across at least two samples.",
+            call. = FALSE
+        )
+    }
+
+    list(
+        name = sampleBlock,
+        values = stats::setNames(values, colnames(x))
+    )
+}
+
+.normalize_genome_correlation <- function(genomeCorrelation) {
+    match.arg(genomeCorrelation, c("independent", "brownian"))
+}
+
+.resolve_feature_phylogeny <- function(object, genome_ids, genomeCorrelation, phylogeny = NULL) {
+    genomeCorrelation <- .normalize_genome_correlation(genomeCorrelation)
+
+    if (identical(genomeCorrelation, "independent")) {
+        return(list(
+            genomeCorrelation = genomeCorrelation,
+            tree = NULL,
+            treeSource = NA_character_,
+            treeTipCount = NA_integer_
+        ))
+    }
+
+    tree_source <- if (is.null(phylogeny)) "genomeTree(x)" else "phylogeny"
+    tree <- .ensure_tree_branch_lengths(
+        .require_genome_tree_object(object, tree = phylogeny)
+    )
+
+    genome_ids <- unique(as.character(genome_ids))
+    genome_ids <- genome_ids[!is.na(genome_ids) & genome_ids != ""]
+    missing_tips <- setdiff(genome_ids, tree$tip.label)
+    if (length(missing_tips) > 0L) {
+        stop(
+            "The selected genome phylogeny is missing genome tip(s) required for this analysis: ",
+            paste(missing_tips, collapse = ", "),
+            ".",
+            call. = FALSE
+        )
+    }
+
+    list(
+        genomeCorrelation = genomeCorrelation,
+        tree = tree,
+        treeSource = tree_source,
+        treeTipCount = as.integer(length(tree$tip.label))
+    )
+}
+
+.prepare_feature_genome_random_effect <- function(data, phylogeny_state) {
+    data <- as.data.frame(data, stringsAsFactors = FALSE)
+
+    if (identical(phylogeny_state$genomeCorrelation, "brownian")) {
+        feature_tree <- .prune_genome_tree(
+            phylogeny_state$tree,
+            unique(as.character(data$genome_id))
+        )
+        phylo_vcov <- ape::vcv(feature_tree)
+        phylo_levels <- rownames(phylo_vcov)
+
+        data$genome_id <- factor(as.character(data$genome_id), levels = phylo_levels)
+        data$phylo_group <- factor("all_genomes", levels = "all_genomes")
+
+        return(list(
+            data = data,
+            randomTerm = "propto(0 + genome_id | phylo_group, phylo_vcov)",
+            formulaEnvironment = list(phylo_vcov = phylo_vcov)
+        ))
+    }
+
+    data$genome_id <- factor(as.character(data$genome_id))
+    list(
+        data = data,
+        randomTerm = "(1 | genome_id)",
+        formulaEnvironment = NULL
+    )
+}
+
+.set_formula_environment <- function(formula, values = NULL) {
+    if (is.null(values) || length(values) == 0L) {
+        return(formula)
+    }
+
+    formula_environment <- list2env(
+        values,
+        parent = environment(formula)
+    )
+    environment(formula) <- formula_environment
+    formula
+}
+
+.fit_glmmtmb_nbinom2 <- function(formula, data, formula_environment = NULL) {
+    formula <- .set_formula_environment(
+        formula = formula,
+        values = formula_environment
+    )
+
+    if (is.null(formula_environment) || length(formula_environment) == 0L) {
+        return(
+            glmmTMB::glmmTMB(
+                formula = formula,
+                data = data,
+                family = glmmTMB::nbinom2(link = "log")
+            )
+        )
+    }
+
+    fit_environment <- list2env(
+        c(
+            list(
+                formula = formula,
+                data = data
+            ),
+            formula_environment
+        ),
+        parent = environment(formula)
+    )
+
+    eval(
+        quote(
+            glmmTMB::glmmTMB(
+                formula = formula,
+                data = data,
+                family = glmmTMB::nbinom2(link = "log")
+            )
+        ),
+        envir = fit_environment
+    )
+}
+
 .normalize_fixed_effect_formula <- function(formula) {
     if (!inherits(formula, "formula")) {
         stop("'formula' must be a formula object.", call. = FALSE)
@@ -671,7 +875,9 @@
 .feature_group_interaction_formula <- function(
     model_spec,
     specification,
-    group_variable = "genome_group"
+    group_variable = "genome_group",
+    genome_random_term = "(1 | genome_id)",
+    sample_block = FALSE
 ) {
     tested_variable <- model_spec$testedVariable
     if (is.null(tested_variable) || is.na(tested_variable) || tested_variable == "") {
@@ -687,10 +893,15 @@
         paste0("`", tested_variable, "`:`", group_variable, "`")
     )
 
+    random_effects <- genome_random_term
+    if (isTRUE(sample_block)) {
+        random_effects <- c(random_effects, "(1 | sample_block)")
+    }
+
     .compose_response_formula(
         fixed_formula = stats::as.formula(paste("~", paste(rhs_terms, collapse = " + "))),
         specification = specification,
-        random_effect = "(1 | genome_id)"
+        random_effects = random_effects
     )
 }
 
@@ -798,6 +1009,7 @@
     feature_summary,
     model_spec,
     model,
+    phylogeny_state,
     keep_fits,
     feature_id_column,
     feature_label,
@@ -846,20 +1058,30 @@
         return(list(result = row, model = NULL))
     }
 
-    data$genome_id <- factor(as.character(data$genome_id))
     data$genome_group <- factor(as.character(data$genome_group), levels = group_spec$levels)
+    random_effect_state <- .prepare_feature_genome_random_effect(
+        data = data,
+        phylogeny_state = phylogeny_state
+    )
+    data <- random_effect_state$data
 
     warning_messages <- character()
     formula <- .feature_group_interaction_formula(
         model_spec = model_spec,
-        specification = model
+        specification = model,
+        genome_random_term = random_effect_state$randomTerm,
+        sample_block = "sample_block" %in% names(data)
+    )
+    formula <- .set_formula_environment(
+        formula = formula,
+        values = random_effect_state$formulaEnvironment
     )
     fit <- tryCatch(
         withCallingHandlers(
-            glmmTMB::glmmTMB(
+            .fit_glmmtmb_nbinom2(
                 formula = formula,
                 data = data,
-                family = glmmTMB::nbinom2(link = "log")
+                formula_environment = random_effect_state$formulaEnvironment
             ),
             warning = function(w) {
                 warning_messages <<- c(warning_messages, conditionMessage(w))
@@ -1389,6 +1611,7 @@
     model_spec,
     specification,
     lib_size,
+    block_spec,
     genome_assay,
     offset_pseudocount
 ) {
@@ -1424,6 +1647,13 @@
         } else {
             obs[[column_name]] <- values
         }
+    }
+
+    if (!is.null(block_spec$values)) {
+        obs$sample_block <- factor(
+            as.character(block_spec$values[obs$sample_id]),
+            levels = levels(block_spec$values)
+        )
     }
 
     if (.specification_uses_library_offset(specification)) {
@@ -1463,6 +1693,7 @@
         testedTerm = model_spec$testedTerm,
         testedVariable = model_spec$testedVariable,
         randomSlopeVariable = model_spec$randomSlopeVariable,
+        sampleBlock = block_spec$name,
         specification = specification,
         libraryOffset = .specification_uses_library_offset(specification),
         genomeOffset = .specification_uses_genome_offset(specification),
@@ -1492,7 +1723,7 @@
     out
 }
 
-.compose_response_formula <- function(fixed_formula, specification, random_effect = NULL) {
+.compose_response_formula <- function(fixed_formula, specification, random_effects = character()) {
     rhs <- paste(deparse(fixed_formula[[2L]]), collapse = " ")
 
     if (.specification_uses_library_offset(specification)) {
@@ -1503,22 +1734,67 @@
         rhs <- c(rhs, "offset(log(genome_abundance_offset))")
     }
 
-    if (!is.null(random_effect)) {
-        rhs <- c(rhs, random_effect)
+    random_effects <- stats::na.omit(as.character(random_effects))
+    random_effects <- random_effects[random_effects != ""]
+    if (length(random_effects) > 0L) {
+        rhs <- c(rhs, random_effects)
     }
 
     stats::as.formula(paste("rna_count ~", paste(rhs, collapse = " + ")))
 }
 
-.feature_model_formula <- function(model_spec, specification) {
+.random_effect_description <- function(
+    genome_random = FALSE,
+    genome_slope = FALSE,
+    genome_phylogenetic = FALSE,
+    sample_block = FALSE
+) {
+    terms <- character()
+
+    if (genome_slope) {
+        if (isTRUE(genome_phylogenetic)) {
+            terms <- c(terms, "genome_phylogenetic_random_intercept_and_slope")
+        } else {
+            terms <- c(terms, "genome_random_intercept_and_slope")
+        }
+    } else if (genome_random) {
+        if (isTRUE(genome_phylogenetic)) {
+            terms <- c(terms, "genome_phylogenetic_random_intercept")
+        } else {
+            terms <- c(terms, "genome_random_intercept")
+        }
+    }
+
+    if (sample_block) {
+        terms <- c(terms, "sample_block_random_intercept")
+    }
+
+    if (length(terms) == 0L) {
+        NA_character_
+    } else {
+        paste(terms, collapse = " + ")
+    }
+}
+
+.feature_model_formula <- function(
+    model_spec,
+    specification,
+    genome_random_term = "(1 | genome_id)",
+    sample_block = FALSE
+) {
+    random_effects <- genome_random_term
+    if (isTRUE(sample_block)) {
+        random_effects <- c(random_effects, "(1 | sample_block)")
+    }
+
     .compose_response_formula(
         fixed_formula = model_spec$fixedFormula,
         specification = specification,
-        random_effect = "(1 | genome_id)"
+        random_effects = random_effects
     )
 }
 
-.feature_random_slope_formula <- function(model_spec, specification) {
+.feature_random_slope_formula <- function(model_spec, specification, sample_block = FALSE) {
     random_slope_variable <- model_spec$randomSlopeVariable
 
     if (is.na(random_slope_variable) || random_slope_variable == "") {
@@ -1528,17 +1804,25 @@
         )
     }
 
+    random_effects <- paste0("(1 + `", random_slope_variable, "` | genome_id)")
+    if (isTRUE(sample_block)) {
+        random_effects <- c(random_effects, "(1 | sample_block)")
+    }
+
     .compose_response_formula(
         fixed_formula = model_spec$fixedFormula,
         specification = specification,
-        random_effect = paste0("(1 + `", random_slope_variable, "` | genome_id)")
+        random_effects = random_effects
     )
 }
 
-.gene_model_formula <- function(model_spec, specification) {
+.gene_model_formula <- function(model_spec, specification, sample_block = FALSE) {
+    random_effects <- if (isTRUE(sample_block)) "(1 | sample_block)" else character()
+
     .compose_response_formula(
         fixed_formula = model_spec$fixedFormula,
-        specification = specification
+        specification = specification,
+        random_effects = random_effects
     )
 }
 
@@ -1900,6 +2184,7 @@
     feature_summary,
     model_spec,
     model,
+    phylogeny_state,
     keep_fits,
     feature_id_column,
     feature_label
@@ -1936,16 +2221,29 @@
         row$error_message <- paste0("All ", feature_label, "-level counts were zero.")
         return(list(result = row, model = NULL))
     }
-    data$genome_id <- factor(as.character(data$genome_id))
+    random_effect_state <- .prepare_feature_genome_random_effect(
+        data = data,
+        phylogeny_state = phylogeny_state
+    )
+    data <- random_effect_state$data
 
     warning_messages <- character()
-    formula <- .feature_model_formula(model_spec = model_spec, specification = model)
+    formula <- .feature_model_formula(
+        model_spec = model_spec,
+        specification = model,
+        genome_random_term = random_effect_state$randomTerm,
+        sample_block = "sample_block" %in% names(data)
+    )
+    formula <- .set_formula_environment(
+        formula = formula,
+        values = random_effect_state$formulaEnvironment
+    )
     fit <- tryCatch(
         withCallingHandlers(
-            glmmTMB::glmmTMB(
+            .fit_glmmtmb_nbinom2(
                 formula = formula,
                 data = data,
-                family = glmmTMB::nbinom2(link = "log")
+                formula_environment = random_effect_state$formulaEnvironment
             ),
             warning = function(w) {
                 warning_messages <<- c(warning_messages, conditionMessage(w))
@@ -2088,7 +2386,11 @@
     data$genome_id <- factor(as.character(data$genome_id))
 
     warning_messages <- character()
-    formula <- .feature_random_slope_formula(model_spec = model_spec, specification = model)
+    formula <- .feature_random_slope_formula(
+        model_spec = model_spec,
+        specification = model,
+        sample_block = "sample_block" %in% names(data)
+    )
     fit <- tryCatch(
         withCallingHandlers(
             glmmTMB::glmmTMB(
@@ -2205,6 +2507,7 @@
     genomeOffset,
     membershipMode,
     libSize,
+    sampleBlock = NULL,
     genomeAssay,
     offsetPseudocount,
     referenceLevels = NULL,
@@ -2212,7 +2515,8 @@
     keepFits,
     path,
     feature_label,
-    fit_model_name
+    fit_model_name,
+    BPPARAM = BiocParallel::SerialParam()
 ) {
     if (!methods::is(x, "MTTKExperiment")) {
         stop("'x' must be an MTTKExperiment.", call. = FALSE)
@@ -2249,6 +2553,7 @@
         genomeOffset = genomeOffset,
         membershipMode = membershipMode,
         libSize = libSize,
+        sampleBlock = sampleBlock,
         genomeAssay = genomeAssay,
         offsetPseudocount = offsetPseudocount,
         path = path,
@@ -2264,7 +2569,7 @@
     genome_assay <- model_state$genomeAssay
     feature_ids <- rownames(feature_summary)
 
-    fitted_rows <- lapply(feature_ids, function(feature_id) {
+    fitted_rows <- BiocParallel::bplapply(feature_ids, function(feature_id) {
         data_feature <- observations[
             as.character(observations[[feature_id_column]]) == feature_id,
             ,
@@ -2280,7 +2585,7 @@
             feature_id_column = feature_id_column,
             feature_label = model_state$featureLabel
         )
-    })
+    }, BPPARAM = BPPARAM)
 
     results <- do.call(
         rbind,
@@ -2309,7 +2614,12 @@
         group_effects <- S4Vectors::DataFrame()
     }
 
-    formula <- .feature_random_slope_formula(model_spec = model_spec, specification = specification)
+    has_sample_block <- !is.na(model_state$sampleBlock) && model_state$sampleBlock != ""
+    formula <- .feature_random_slope_formula(
+        model_spec = model_spec,
+        specification = specification,
+        sample_block = has_sample_block
+    )
     info <- list(
         backend = "glmmTMB",
         model = fit_model_name,
@@ -2335,9 +2645,13 @@
         offsetPseudocount = model_state$offsetPseudocount,
         family = "nbinom2",
         formula = paste(deparse(formula), collapse = " "),
-        randomEffects = "genome_random_intercept_and_slope",
+        randomEffects = .random_effect_description(
+            genome_slope = TRUE,
+            sample_block = has_sample_block
+        ),
         groupEffectColumn = "genome_id",
         randomSlopeVariable = model_state$randomSlopeVariable,
+        sampleBlock = model_state$sampleBlock,
         n_features = nrow(results),
         n_ok = sum(results$status == "ok"),
         n_skipped = sum(results$status == "skipped"),
@@ -2364,6 +2678,7 @@
     genomeOffset,
     membershipMode,
     libSize,
+    sampleBlock,
     genomeAssay,
     offsetPseudocount,
     path,
@@ -2386,6 +2701,11 @@
         genomeAssay = genomeAssay,
         offsetPseudocount = offsetPseudocount
     )
+    block_spec <- .normalize_sample_block_spec(
+        x = x,
+        sampleBlock = sampleBlock,
+        fixed_variables = model_spec$fixedVariables
+    )
 
     aggregated <- .aggregate_rna_by_feature_genome(
         x = x,
@@ -2400,6 +2720,7 @@
         model_spec = model_spec,
         specification = offset_state$specification,
         lib_size = offset_state$libSize,
+        block_spec = block_spec,
         genome_assay = offset_state$genomeAssay,
         offset_pseudocount = offset_state$offsetPseudocount
     )
@@ -2415,13 +2736,17 @@
     genomeOffset,
     membershipMode,
     libSize,
+    sampleBlock = NULL,
+    genomeCorrelation = c("independent", "brownian"),
+    phylogeny = NULL,
     genomeAssay,
     offsetPseudocount,
     referenceLevels = NULL,
     keepFits,
     path,
     feature_label,
-    fit_model_name
+    fit_model_name,
+    BPPARAM = BiocParallel::SerialParam()
 ) {
     if (!methods::is(x, "MTTKExperiment")) {
         stop("'x' must be an MTTKExperiment.", call. = FALSE)
@@ -2437,6 +2762,8 @@
     if (!is.logical(keepFits) || length(keepFits) != 1L || is.na(keepFits)) {
         stop("'keepFits' must be TRUE or FALSE.", call. = FALSE)
     }
+
+    genome_correlation <- .normalize_genome_correlation(genomeCorrelation)
 
     model_spec <- .normalize_model_spec(
         x = x,
@@ -2457,6 +2784,7 @@
         genomeOffset = genomeOffset,
         membershipMode = membershipMode,
         libSize = libSize,
+        sampleBlock = sampleBlock,
         genomeAssay = genomeAssay,
         offsetPseudocount = offsetPseudocount,
         path = path,
@@ -2471,8 +2799,14 @@
     assay_name <- model_state$sourceAssay
     genome_assay <- model_state$genomeAssay
     feature_ids <- rownames(feature_summary)
+    phylogeny_state <- .resolve_feature_phylogeny(
+        object = x,
+        genome_ids = observations$genome_id,
+        genomeCorrelation = genome_correlation,
+        phylogeny = phylogeny
+    )
 
-    fitted_rows <- lapply(feature_ids, function(feature_id) {
+    fitted_rows <- BiocParallel::bplapply(feature_ids, function(feature_id) {
         data_feature <- observations[
             as.character(observations[[feature_id_column]]) == feature_id,
             ,
@@ -2484,11 +2818,12 @@
             feature_summary = feature_summary[feature_id, , drop = FALSE],
             model_spec = model_spec,
             model = specification,
+            phylogeny_state = phylogeny_state,
             keep_fits = keepFits,
             feature_id_column = feature_id_column,
             feature_label = model_state$featureLabel
         )
-    })
+    }, BPPARAM = BPPARAM)
 
     results <- do.call(
         rbind,
@@ -2509,7 +2844,18 @@
         list()
     }
 
-    formula <- .feature_model_formula(model_spec = model_spec, specification = specification)
+    has_sample_block <- !is.na(model_state$sampleBlock) && model_state$sampleBlock != ""
+    genome_random_term <- if (identical(genome_correlation, "brownian")) {
+        "propto(0 + genome_id | phylo_group, phylo_vcov)"
+    } else {
+        "(1 | genome_id)"
+    }
+    formula <- .feature_model_formula(
+        model_spec = model_spec,
+        specification = specification,
+        genome_random_term = genome_random_term,
+        sample_block = has_sample_block
+    )
     info <- list(
         backend = "glmmTMB",
         model = fit_model_name,
@@ -2533,8 +2879,17 @@
         libSizeSource = model_state$libSizeSource,
         genomeAssay = genome_assay,
         offsetPseudocount = model_state$offsetPseudocount,
+        genomeCorrelation = genome_correlation,
+        treeSource = phylogeny_state$treeSource,
+        treeTipCount = phylogeny_state$treeTipCount,
         family = "nbinom2",
         formula = paste(deparse(formula), collapse = " "),
+        randomEffects = .random_effect_description(
+            genome_random = TRUE,
+            genome_phylogenetic = identical(genome_correlation, "brownian"),
+            sample_block = has_sample_block
+        ),
+        sampleBlock = model_state$sampleBlock,
         n_features = nrow(results),
         n_ok = sum(results$status == "ok"),
         n_skipped = sum(results$status == "skipped"),
@@ -2560,13 +2915,17 @@
     genomeOffset,
     membershipMode,
     libSize,
+    sampleBlock = NULL,
+    genomeCorrelation = c("independent", "brownian"),
+    phylogeny = NULL,
     genomeAssay,
     offsetPseudocount,
     referenceLevels = NULL,
     keepFits,
     path,
     feature_label,
-    fit_model_name
+    fit_model_name,
+    BPPARAM = BiocParallel::SerialParam()
 ) {
     if (!methods::is(x, "MTTKExperiment")) {
         stop("'x' must be an MTTKExperiment.", call. = FALSE)
@@ -2582,6 +2941,8 @@
     if (!is.logical(keepFits) || length(keepFits) != 1L || is.na(keepFits)) {
         stop("'keepFits' must be TRUE or FALSE.", call. = FALSE)
     }
+
+    genome_correlation <- .normalize_genome_correlation(genomeCorrelation)
 
     model_spec <- .normalize_model_spec(
         x = x,
@@ -2602,6 +2963,7 @@
         genomeOffset = genomeOffset,
         membershipMode = membershipMode,
         libSize = libSize,
+        sampleBlock = sampleBlock,
         genomeAssay = genomeAssay,
         offsetPseudocount = offsetPseudocount,
         path = path,
@@ -2622,6 +2984,12 @@
     assay_name <- model_state$sourceAssay
     genome_assay <- model_state$genomeAssay
     feature_ids <- rownames(feature_summary)
+    phylogeny_state <- .resolve_feature_phylogeny(
+        object = x,
+        genome_ids = observations$genome_id,
+        genomeCorrelation = genome_correlation,
+        phylogeny = phylogeny
+    )
     group_spec <- list(
         groupColumn = model_state$groupColumn,
         referenceLevel = model_state$groupReferenceLevel,
@@ -2629,7 +2997,7 @@
         levels = model_state$groupLevels
     )
 
-    fitted_rows <- lapply(feature_ids, function(feature_id) {
+    fitted_rows <- BiocParallel::bplapply(feature_ids, function(feature_id) {
         data_feature <- observations[
             as.character(observations[[feature_id_column]]) == feature_id,
             ,
@@ -2641,12 +3009,13 @@
             feature_summary = feature_summary[feature_id, , drop = FALSE],
             model_spec = model_spec,
             model = specification,
+            phylogeny_state = phylogeny_state,
             keep_fits = keepFits,
             feature_id_column = feature_id_column,
             feature_label = model_state$featureLabel,
             group_spec = group_spec
         )
-    })
+    }, BPPARAM = BPPARAM)
 
     results <- do.call(
         rbind,
@@ -2669,9 +3038,17 @@
 
     resolved_terms <- unique(stats::na.omit(as.character(results$tested_term)))
 
+    has_sample_block <- !is.na(model_state$sampleBlock) && model_state$sampleBlock != ""
+    genome_random_term <- if (identical(genome_correlation, "brownian")) {
+        "propto(0 + genome_id | phylo_group, phylo_vcov)"
+    } else {
+        "(1 | genome_id)"
+    }
     formula <- .feature_group_interaction_formula(
         model_spec = model_spec,
-        specification = specification
+        specification = specification,
+        genome_random_term = genome_random_term,
+        sample_block = has_sample_block
     )
     info <- list(
         backend = "glmmTMB",
@@ -2700,6 +3077,9 @@
         libSizeSource = model_state$libSizeSource,
         genomeAssay = genome_assay,
         offsetPseudocount = model_state$offsetPseudocount,
+        genomeCorrelation = genome_correlation,
+        treeSource = phylogeny_state$treeSource,
+        treeTipCount = phylogeny_state$treeTipCount,
         family = "nbinom2",
         formula = paste(deparse(formula), collapse = " "),
         groupColumn = model_state$groupColumn,
@@ -2707,7 +3087,12 @@
         groupContrastLevel = model_state$groupContrastLevel,
         groupLevels = model_state$groupLevels,
         interactionVariable = model_state$testedVariable,
-        randomEffects = "genome_random_intercept",
+        randomEffects = .random_effect_description(
+            genome_random = TRUE,
+            genome_phylogenetic = identical(genome_correlation, "brownian"),
+            sample_block = has_sample_block
+        ),
+        sampleBlock = model_state$sampleBlock,
         n_features = nrow(results),
         n_ok = sum(results$status == "ok"),
         n_skipped = sum(results$status == "skipped"),
@@ -2860,7 +3245,15 @@
     )
 }
 
-.fit_one_ko_mixed_model <- function(data, ko_id, ko_summary, variable_info, model, keep_fits) {
+.fit_one_ko_mixed_model <- function(
+    data,
+    ko_id,
+    ko_summary,
+    variable_info,
+    model,
+    keep_fits,
+    phylogeny_state = list(genomeCorrelation = "independent", tree = NULL)
+) {
     model_spec <- variable_info$modelSpec
     if (is.null(model_spec)) {
         stop(
@@ -2875,2174 +3268,9 @@
         feature_summary = ko_summary,
         model_spec = model_spec,
         model = model,
+        phylogeny_state = phylogeny_state,
         keep_fits = keep_fits,
         feature_id_column = "ko_id",
         feature_label = "KO"
-    )
-}
-
-#' Aggregate Gene RNA to KO-within-Genome Counts
-#'
-#' `aggregateToKOGenome()` collapses a gene-level assay to KO/genome pairs. The
-#' returned rows represent KO-within-genome observations, which are the units
-#' used by the first KO-level mixed-model workflow in MTTK.
-#'
-#' Row metadata always includes `ko_id`, `genome_id`, `n_genes_pair`, and
-#' `n_links_pair`. Available `genomeData(x)` columns are appended when they can
-#' be aligned unambiguously to the genome identifiers of the aggregated rows.
-#'
-#' @param x An `MTTKExperiment`.
-#' @param assay A single gene-level assay name to aggregate.
-#'
-#' @return A `SummarizedExperiment` with one row per KO/genome pair and one
-#'   column per sample.
-#'
-#' @examples
-#' x <- makeExampleMTTKExperiment()
-#' ko_genome <- aggregateToKOGenome(x)
-#' ko_genome
-#' SummarizedExperiment::rowData(ko_genome)[, c("ko_id", "genome_id")]
-#'
-#' @export
-aggregateToKOGenome <- function(x, assay = "rna_gene_counts") {
-    if (!methods::is(x, "MTTKExperiment")) {
-        stop("'x' must be an MTTKExperiment.", call. = FALSE)
-    }
-
-    assay_name <- .normalize_analysis_assays(x, assay)
-    if (length(assay_name) != 1L) {
-        stop("'assay' must be a single gene-level assay name.", call. = FALSE)
-    }
-
-    .aggregate_rna_by_ko_genome(x, assay_name = assay_name)
-}
-
-#' Build a KO Mixed-Model Data Table
-#'
-#' `makeKOMixedModelData()` materializes the long-form observation table used by
-#' [fitKOMixedModel()]. Each row corresponds to one KO/genome/sample
-#' observation, with RNA counts, sample-level covariates, and optional
-#' genome-abundance offsets aligned and ready for model fitting.
-#'
-#' The returned table is useful for inspecting the modeled data before fitting,
-#' or for reusing the same KO/genome aggregation in custom workflows.
-#'
-#' @param x An `MTTKExperiment`.
-#' @param variable A single sample-level column name from `colData(x)` for the
-#'   simple one-variable interface. The column must be numeric or a factor with
-#'   exactly two levels. Supply exactly one of `variable` or `formula`.
-#' @param formula Optional one-sided or two-sided fixed-effect formula for the
-#'   sample-level covariates, for example `~ condition + pH` or
-#'   `rna_count ~ condition + pH`. Offsets and genome-level random effects are
-#'   added internally by MTTK. Supply exactly one of `variable` or `formula`.
-#' @param term Optional fixed-effect term to extract from a formula-based fit.
-#'   This is required when the fixed-effect formula defines more than one tested
-#'   term.
-#' @param assay Gene-level assay name used as the RNA response.
-#' @param libraryOffset Logical; if `TRUE`, include `offset(log(lib_size))`.
-#' @param libSize Library-size offset specification. Use `NULL` to compute
-#'   `colSums(rnaGeneCounts(x))`, a single `colData(x)` column name, or a
-#'   numeric vector with one value per sample.
-#' @param genomeOffset Logical; if `TRUE`, include
-#'   `offset(log(genome_abundance + offsetPseudocount))`. If `NULL` (the
-#'   default), MTTK uses genome-abundance normalization when `genomeAssay` is
-#'   available in `genomeExperiment(x)`.
-#' @param genomeAssay Genome-level assay used when `genomeOffset = TRUE`.
-#' @param offsetPseudocount Non-negative pseudocount added to genome abundance
-#'   before log-offset calculation.
-#' @param referenceLevels Optional named list or named character vector setting
-#'   the reference levels of factor-like sample covariates before model fitting.
-#'
-#' @return An `S4Vectors::DataFrame` with one row per KO/genome/sample
-#'   observation.
-#'
-#' @examples
-#' x <- makeExampleMTTKExperiment()
-#' model_data <- makeKOMixedModelData(x, variable = "condition")
-#' model_data
-#'
-#' @export
-makeKOMixedModelData <- function(
-    x,
-    variable = NULL,
-    formula = NULL,
-    term = NULL,
-    assay = "rna_gene_counts",
-    libraryOffset = TRUE,
-    genomeOffset = NULL,
-    libSize = NULL,
-    genomeAssay = "dna_genome_counts",
-    offsetPseudocount = 1,
-    referenceLevels = NULL
-) {
-    if (!methods::is(x, "MTTKExperiment")) {
-        stop("'x' must be an MTTKExperiment.", call. = FALSE)
-    }
-
-    model_spec <- .normalize_model_spec(
-        x = x,
-        variable = variable,
-        formula = formula,
-        term = term,
-        referenceLevels = referenceLevels,
-        allow_formula = TRUE,
-        allow_random_slope = FALSE
-    )
-
-    out <- .make_feature_mixed_model_data(
-        x = x,
-        model_spec = model_spec,
-        assay = assay,
-        libraryOffset = libraryOffset,
-        genomeOffset = genomeOffset,
-        membershipMode = "duplicate",
-        libSize = libSize,
-        genomeAssay = genomeAssay,
-        offsetPseudocount = offsetPseudocount,
-        path = "gene_to_ko",
-        feature_label = "KO"
-    )
-
-    metadata_list <- S4Vectors::metadata(out)
-    metadata_list$mttk_ko_model <- metadata_list$mttk_function_mixed_model
-    S4Vectors::metadata(out) <- metadata_list
-    out
-}
-
-#' Fit a KO-Level Mixed Model
-#'
-#' `fitKOMixedModel()` fits one negative-binomial mixed model per KO using
-#' `glmmTMB`. RNA counts are first aggregated to KO-within-genome observations,
-#' so the fitted model respects the nesting of genes within genomes.
-#'
-#' `libraryOffset` controls whether the model includes
-#' `offset(log(lib_size))`. `genomeOffset` controls whether the model includes
-#' `offset(log(genome_abundance + offsetPseudocount))`. The genome random
-#' effect `(1 | genome_id)` is part of this workflow regardless of the offset
-#' settings.
-#'
-#' This workflow is intended for KO-level differential expression or association
-#' analysis, where each KO can be observed in multiple genomes and the genome
-#' term should be modeled explicitly as a random intercept.
-#'
-#' @param x An `MTTKExperiment`.
-#' @param variable A single sample-level column name from `colData(x)` for the
-#'   simple one-variable interface. The column must be numeric or a factor with
-#'   exactly two levels. Supply exactly one of `variable` or `formula`.
-#' @param formula Optional one-sided or two-sided fixed-effect formula for the
-#'   sample-level covariates, for example `~ condition + salinity` or
-#'   `rna_count ~ condition + salinity`. Offsets and genome-level random
-#'   effects are added internally by MTTK. Supply exactly one of `variable` or
-#'   `formula`.
-#' @param term Optional fixed-effect term to extract from a formula-based fit.
-#'   This is required when the fixed-effect formula defines more than one tested
-#'   term.
-#' @param assay Gene-level assay name used as the RNA response.
-#' @param libraryOffset Logical; if `TRUE`, include `offset(log(lib_size))`.
-#' @param libSize Library-size offset specification. Use `NULL` to compute
-#'   `colSums(rnaGeneCounts(x))`, a single `colData(x)` column name, or a
-#'   numeric vector with one value per sample.
-#' @param genomeOffset Logical; if `TRUE`, include
-#'   `offset(log(genome_abundance + offsetPseudocount))`. If `NULL` (the
-#'   default), MTTK uses genome-abundance normalization when `genomeAssay` is
-#'   available in `genomeExperiment(x)`.
-#' @param genomeAssay Genome-level assay used when `genomeOffset = TRUE`.
-#' @param offsetPseudocount Non-negative pseudocount added to genome abundance
-#'   before log-offset calculation.
-#' @param referenceLevels Optional named list or named character vector setting
-#'   the reference levels of factor-like sample covariates before model fitting.
-#' @param keepFits Logical; if `TRUE`, store the backend `glmmTMB` model objects
-#'   in the returned `MTTKFit`.
-#'
-#' @return An `MTTKFit` with one row per KO.
-#'
-#' @examples
-#' if (requireNamespace("glmmTMB", quietly = TRUE)) {
-#'     x <- makeExampleMTTKExperiment()
-#'     fit <- fitKOMixedModel(x, variable = "condition")
-#'     fit
-#'     significantResults(fit)
-#' }
-#'
-#' @export
-fitKOMixedModel <- function(
-    x,
-    variable = NULL,
-    formula = NULL,
-    term = NULL,
-    assay = "rna_gene_counts",
-    libraryOffset = TRUE,
-    genomeOffset = NULL,
-    libSize = NULL,
-    genomeAssay = "dna_genome_counts",
-    offsetPseudocount = 1,
-    referenceLevels = NULL,
-    keepFits = FALSE
-) {
-    .fit_feature_mixed_model(
-        x = x,
-        variable = variable,
-        formula = formula,
-        term = term,
-        assay = assay,
-        libraryOffset = libraryOffset,
-        genomeOffset = genomeOffset,
-        membershipMode = "duplicate",
-        libSize = libSize,
-        genomeAssay = genomeAssay,
-        offsetPseudocount = offsetPseudocount,
-        referenceLevels = referenceLevels,
-        keepFits = keepFits,
-        path = "gene_to_ko",
-        feature_label = "KO",
-        fit_model_name = "ko_mixed_model"
-    )
-}
-
-#' Fit a KO-Level Genome-Group Interaction Model
-#'
-#' `fitKOGroupInteractionModel()` fits one negative-binomial mixed model per KO
-#' using `glmmTMB`, with a genome random intercept and a fixed interaction
-#' between the selected sample-level effect and a two-level genome grouping
-#' variable from `genomeData(x)`.
-#'
-#' RNA counts are first aggregated to KO-within-genome observations. The fitted
-#' interaction term answers the direct question: does the KO response differ
-#' between two genome groups, such as domains or selected clades, after
-#' adjusting for the chosen sample-level covariates and offsets?
-#'
-#' @inheritParams fitKOMixedModel
-#' @param group A single column name from `genomeData(x)` defining the genome
-#'   groups to compare.
-#' @param groupLevels Optional character vector of length 2 giving the genome
-#'   group reference and contrast levels. If `NULL`, the grouping column must
-#'   contain exactly two usable groups.
-#'
-#' @return An `MTTKFit` with one row per KO.
-#'
-#' @examples
-#' if (requireNamespace("glmmTMB", quietly = TRUE)) {
-#'     x <- makeShowcaseMTTKExperiment()
-#'     fit <- fitKOGroupInteractionModel(
-#'         x,
-#'         variable = "condition",
-#'         group = "domain"
-#'     )
-#'     fit
-#' }
-#'
-#' @export
-fitKOGroupInteractionModel <- function(
-    x,
-    variable = NULL,
-    formula = NULL,
-    term = NULL,
-    group,
-    groupLevels = NULL,
-    assay = "rna_gene_counts",
-    libraryOffset = TRUE,
-    genomeOffset = NULL,
-    libSize = NULL,
-    genomeAssay = "dna_genome_counts",
-    offsetPseudocount = 1,
-    referenceLevels = NULL,
-    keepFits = FALSE
-) {
-    .fit_feature_group_interaction_model(
-        x = x,
-        variable = variable,
-        formula = formula,
-        term = term,
-        group = group,
-        groupLevels = groupLevels,
-        assay = assay,
-        libraryOffset = libraryOffset,
-        genomeOffset = genomeOffset,
-        membershipMode = "duplicate",
-        libSize = libSize,
-        genomeAssay = genomeAssay,
-        offsetPseudocount = offsetPseudocount,
-        referenceLevels = referenceLevels,
-        keepFits = keepFits,
-        path = "gene_to_ko",
-        feature_label = "KO",
-        fit_model_name = "ko_group_interaction_model"
-    )
-}
-
-#' Fit a KO-Level Random-Slope Mixed Model
-#'
-#' `fitKORandomSlopeModel()` fits one negative-binomial mixed model per KO using
-#' `glmmTMB`, with both a random intercept and a random slope for the selected
-#' sample-level variable across genomes.
-#'
-#' RNA counts are first aggregated to KO-within-genome observations. The fitted
-#' model then estimates an overall KO-level effect together with genome-specific
-#' deviations around that effect. This workflow is intended for questions such
-#' as whether the same KO responds differently across genomes, and whether those
-#' genome-specific KO responses appear similar or heterogeneous.
-#'
-#' `libraryOffset` controls whether the model includes
-#' `offset(log(lib_size))`. `genomeOffset` controls whether the model includes
-#' `offset(log(genome_abundance + offsetPseudocount))`.
-#'
-#' Genome-specific KO coefficients can be extracted with [koGenomeEffects()].
-#'
-#' @inheritParams fitKOMixedModel
-#' @param randomSlope Optional sample-level variable whose genome-specific slope
-#'   should be modeled when `formula` is used. If omitted, MTTK uses the tested
-#'   variable when it can be inferred unambiguously.
-#'
-#' @return An `MTTKFit` with one row per KO. The returned fit also stores
-#'   KO-by-genome conditional effects that can be extracted with
-#'   [koGenomeEffects()].
-#'
-#' @examples
-#' if (requireNamespace("glmmTMB", quietly = TRUE)) {
-#'     x <- makeExampleMTTKExperiment()
-#'     fit <- fitKORandomSlopeModel(x, variable = "condition")
-#'     fit
-#'     koGenomeEffects(fit)
-#' }
-#'
-#' @export
-fitKORandomSlopeModel <- function(
-    x,
-    variable = NULL,
-    formula = NULL,
-    term = NULL,
-    assay = "rna_gene_counts",
-    libraryOffset = TRUE,
-    genomeOffset = NULL,
-    libSize = NULL,
-    genomeAssay = "dna_genome_counts",
-    offsetPseudocount = 1,
-    referenceLevels = NULL,
-    randomSlope = NULL,
-    keepFits = FALSE
-) {
-    .fit_feature_random_slope_model(
-        x = x,
-        variable = variable,
-        formula = formula,
-        term = term,
-        assay = assay,
-        libraryOffset = libraryOffset,
-        genomeOffset = genomeOffset,
-        membershipMode = "duplicate",
-        libSize = libSize,
-        genomeAssay = genomeAssay,
-        offsetPseudocount = offsetPseudocount,
-        referenceLevels = referenceLevels,
-        randomSlope = randomSlope,
-        keepFits = keepFits,
-        path = "gene_to_ko",
-        feature_label = "KO",
-        fit_model_name = "ko_random_slope_model"
-    )
-}
-
-#' Aggregate Gene RNA to Module-within-Genome Counts
-#'
-#' `aggregateToModuleGenome()` collapses a gene-level assay to module/genome
-#' pairs by following the functional path `gene_to_ko -> ko_to_module`. The
-#' returned rows represent module-within-genome observations that can be used in
-#' module-level mixed models.
-#'
-#' Because KO-to-module membership can be many-to-many, the same gene can
-#' contribute to multiple modules. `membershipMode = "duplicate"` carries the
-#' full count into each mapped module/genome observation and is appropriate for
-#' the question "how much RNA is assigned to this module?". In contrast,
-#' `membershipMode = "exclusive"` keeps only genes whose final module mapping is
-#' unique, which is more conservative and avoids duplicated counts entirely.
-#'
-#' @param x An `MTTKExperiment`.
-#' @param assay A single gene-level assay name to aggregate.
-#' @param membershipMode How to handle many-to-many set memberships.
-#'   `"duplicate"` carries a gene's RNA into every mapped module, while
-#'   `"exclusive"` keeps only uniquely mapped genes.
-#'
-#' @return A `SummarizedExperiment` with one row per module/genome pair and one
-#'   column per sample.
-#'
-#' @examples
-#' x <- makeExampleMTTKExperiment()
-#' module_genome <- aggregateToModuleGenome(x)
-#' module_genome
-#' SummarizedExperiment::rowData(module_genome)[, c("module_id", "genome_id")]
-#'
-#' @export
-aggregateToModuleGenome <- function(
-    x,
-    assay = "rna_gene_counts",
-    membershipMode = c("duplicate", "exclusive")
-) {
-    if (!methods::is(x, "MTTKExperiment")) {
-        stop("'x' must be an MTTKExperiment.", call. = FALSE)
-    }
-
-    assay_name <- .normalize_analysis_assays(x, assay)
-    if (length(assay_name) != 1L) {
-        stop("'assay' must be a single gene-level assay name.", call. = FALSE)
-    }
-
-    .aggregate_rna_by_feature_genome(
-        x = x,
-        assay_name = assay_name,
-        path = c("gene_to_ko", "ko_to_module"),
-        feature_label = "module",
-        membership_mode = match.arg(membershipMode)
-    )
-}
-
-#' Build a Module Mixed-Model Data Table
-#'
-#' `makeModuleMixedModelData()` materializes the long-form observation table
-#' used by [fitModuleMixedModel()]. Each row corresponds to one
-#' module/genome/sample observation, with RNA counts, sample-level covariates,
-#' and optional genome-abundance offsets aligned and ready for model fitting.
-#'
-#' @inheritParams makeKOMixedModelData
-#' @inheritParams aggregateToModuleGenome
-#'
-#' @return An `S4Vectors::DataFrame` with one row per module/genome/sample
-#'   observation.
-#'
-#' @examples
-#' x <- makeExampleMTTKExperiment()
-#' model_data <- makeModuleMixedModelData(x, variable = "condition")
-#' model_data
-#'
-#' @export
-makeModuleMixedModelData <- function(
-    x,
-    variable = NULL,
-    formula = NULL,
-    term = NULL,
-    assay = "rna_gene_counts",
-    libraryOffset = TRUE,
-    genomeOffset = NULL,
-    membershipMode = c("duplicate", "exclusive"),
-    libSize = NULL,
-    genomeAssay = "dna_genome_counts",
-    offsetPseudocount = 1,
-    referenceLevels = NULL
-) {
-    membershipMode <- match.arg(membershipMode)
-    model_spec <- .normalize_model_spec(
-        x = x,
-        variable = variable,
-        formula = formula,
-        term = term,
-        referenceLevels = referenceLevels,
-        allow_formula = TRUE,
-        allow_random_slope = FALSE
-    )
-    .make_feature_mixed_model_data(
-        x = x,
-        model_spec = model_spec,
-        assay = assay,
-        libraryOffset = libraryOffset,
-        genomeOffset = genomeOffset,
-        membershipMode = membershipMode,
-        libSize = libSize,
-        genomeAssay = genomeAssay,
-        offsetPseudocount = offsetPseudocount,
-        path = c("gene_to_ko", "ko_to_module"),
-        feature_label = "module"
-    )
-}
-
-#' Fit a Module-Level Mixed Model
-#'
-#' `fitModuleMixedModel()` fits one negative-binomial mixed model per module
-#' using `glmmTMB`. Gene-level RNA counts are first aggregated to
-#' module-within-genome observations by following `gene_to_ko -> ko_to_module`,
-#' then each module is modeled across genomes and samples.
-#'
-#' This workflow is intended for the total-activity question: does the summed
-#' RNA assigned to a module shift across samples after accounting for genome
-#' structure and optional genome abundance? For the different question of
-#' whether the KO-level effects assigned to a module show a coherent direction
-#' of change, use [fitModuleMetaAnalysis()] instead.
-#'
-#' `membershipMode = "duplicate"` answers that question in terms of all RNA
-#' assigned to the module, even if the same KO contributes to multiple modules.
-#' `membershipMode = "exclusive"` instead restricts the analysis to uniquely
-#' assigned memberships, which avoids duplicated counts but may remove many
-#' genes when module overlap is dense.
-#'
-#' `libraryOffset` controls whether the model includes
-#' `offset(log(lib_size))`. `genomeOffset` controls whether the model includes
-#' `offset(log(genome_abundance + offsetPseudocount))`. The genome random
-#' effect `(1 | genome_id)` is part of this workflow regardless of the offset
-#' settings.
-#'
-#' @inheritParams fitKOMixedModel
-#' @inheritParams aggregateToModuleGenome
-#'
-#' @return An `MTTKFit` with one row per module.
-#'
-#' @examples
-#' if (requireNamespace("glmmTMB", quietly = TRUE)) {
-#'     x <- makeExampleMTTKExperiment()
-#'     fit <- fitModuleMixedModel(x, variable = "condition")
-#'     fit
-#' }
-#'
-#' @export
-fitModuleMixedModel <- function(
-    x,
-    variable = NULL,
-    formula = NULL,
-    term = NULL,
-    assay = "rna_gene_counts",
-    libraryOffset = TRUE,
-    genomeOffset = NULL,
-    membershipMode = c("duplicate", "exclusive"),
-    libSize = NULL,
-    genomeAssay = "dna_genome_counts",
-    offsetPseudocount = 1,
-    referenceLevels = NULL,
-    keepFits = FALSE
-) {
-    membershipMode <- match.arg(membershipMode)
-    .fit_feature_mixed_model(
-        x = x,
-        variable = variable,
-        formula = formula,
-        term = term,
-        assay = assay,
-        libraryOffset = libraryOffset,
-        genomeOffset = genomeOffset,
-        membershipMode = membershipMode,
-        libSize = libSize,
-        genomeAssay = genomeAssay,
-        offsetPseudocount = offsetPseudocount,
-        referenceLevels = referenceLevels,
-        keepFits = keepFits,
-        path = c("gene_to_ko", "ko_to_module"),
-        feature_label = "module",
-        fit_model_name = "module_mixed_model"
-    )
-}
-
-#' Fit a Module-Level Genome-Group Interaction Model
-#'
-#' `fitModuleGroupInteractionModel()` fits one negative-binomial mixed model per
-#' module using `glmmTMB`, with a genome random intercept and a fixed
-#' interaction between the selected sample-level effect and a two-level genome
-#' grouping variable from `genomeData(x)`.
-#'
-#' This workflow is intended for the direct question: does the module response
-#' differ between two genome groups after accounting for genome nesting,
-#' optional genome abundance, and any covariates included in the fixed-effects
-#' formula?
-#'
-#' @inheritParams fitModuleMixedModel
-#' @param group A single column name from `genomeData(x)` defining the genome
-#'   groups to compare.
-#' @param groupLevels Optional character vector of length 2 giving the genome
-#'   group reference and contrast levels. If `NULL`, the grouping column must
-#'   contain exactly two usable groups.
-#'
-#' @return An `MTTKFit` with one row per module.
-#'
-#' @examples
-#' if (requireNamespace("glmmTMB", quietly = TRUE)) {
-#'     x <- makeShowcaseMTTKExperiment()
-#'     fit <- fitModuleGroupInteractionModel(
-#'         x,
-#'         variable = "condition",
-#'         group = "domain"
-#'     )
-#'     fit
-#' }
-#'
-#' @export
-fitModuleGroupInteractionModel <- function(
-    x,
-    variable = NULL,
-    formula = NULL,
-    term = NULL,
-    group,
-    groupLevels = NULL,
-    assay = "rna_gene_counts",
-    libraryOffset = TRUE,
-    genomeOffset = NULL,
-    membershipMode = c("duplicate", "exclusive"),
-    libSize = NULL,
-    genomeAssay = "dna_genome_counts",
-    offsetPseudocount = 1,
-    referenceLevels = NULL,
-    keepFits = FALSE
-) {
-    membershipMode <- match.arg(membershipMode)
-    .fit_feature_group_interaction_model(
-        x = x,
-        variable = variable,
-        formula = formula,
-        term = term,
-        group = group,
-        groupLevels = groupLevels,
-        assay = assay,
-        libraryOffset = libraryOffset,
-        genomeOffset = genomeOffset,
-        membershipMode = membershipMode,
-        libSize = libSize,
-        genomeAssay = genomeAssay,
-        offsetPseudocount = offsetPseudocount,
-        referenceLevels = referenceLevels,
-        keepFits = keepFits,
-        path = c("gene_to_ko", "ko_to_module"),
-        feature_label = "module",
-        fit_model_name = "module_group_interaction_model"
-    )
-}
-
-#' Fit a Module-Level Random-Slope Mixed Model
-#'
-#' `fitModuleRandomSlopeModel()` fits one negative-binomial mixed model per
-#' module using `glmmTMB`, with both a genome random intercept and a
-#' genome-specific random slope for the selected sample variable.
-#'
-#' Gene-level RNA counts are first aggregated to module-within-genome
-#' observations by following `gene_to_ko -> ko_to_module`. The fitted model then
-#' estimates an overall module-level effect together with genome-specific
-#' deviations around that module effect.
-#'
-#' This workflow is intended for the question: does the same module show similar
-#' or heterogeneous condition-associated responses across genomes? For the
-#' higher-level question of whether KO-level module members show a coherent
-#' direction of change without re-aggregating counts, use
-#' [fitModuleMetaAnalysis()] instead.
-#'
-#' `membershipMode = "duplicate"` answers that question in terms of all RNA
-#' assigned to the module, even if the same KO contributes to multiple modules.
-#' `membershipMode = "exclusive"` instead restricts the analysis to uniquely
-#' assigned memberships.
-#'
-#' Genome-specific conditional module effects can be extracted with
-#' [moduleGenomeEffects()].
-#'
-#' @inheritParams fitModuleMixedModel
-#' @param randomSlope Optional sample-level variable whose genome-specific slope
-#'   should be estimated. When `variable` is supplied, MTTK uses that variable.
-#'   When `formula` is supplied, `randomSlope` can be omitted only if MTTK can
-#'   infer a single tested variable unambiguously.
-#'
-#' @return An `MTTKFit` with one row per module. The returned fit also stores
-#'   module-by-genome conditional effects that can be extracted with
-#'   [moduleGenomeEffects()].
-#'
-#' @examples
-#' if (requireNamespace("glmmTMB", quietly = TRUE)) {
-#'     x <- makeExampleMTTKExperiment()
-#'     fit <- fitModuleRandomSlopeModel(x, variable = "condition")
-#'     fit
-#'     moduleGenomeEffects(fit)
-#' }
-#'
-#' @export
-fitModuleRandomSlopeModel <- function(
-    x,
-    variable = NULL,
-    formula = NULL,
-    term = NULL,
-    assay = "rna_gene_counts",
-    libraryOffset = TRUE,
-    genomeOffset = NULL,
-    membershipMode = c("duplicate", "exclusive"),
-    libSize = NULL,
-    genomeAssay = "dna_genome_counts",
-    offsetPseudocount = 1,
-    referenceLevels = NULL,
-    randomSlope = NULL,
-    keepFits = FALSE
-) {
-    membershipMode <- match.arg(membershipMode)
-    .fit_feature_random_slope_model(
-        x = x,
-        variable = variable,
-        formula = formula,
-        term = term,
-        assay = assay,
-        libraryOffset = libraryOffset,
-        genomeOffset = genomeOffset,
-        membershipMode = membershipMode,
-        libSize = libSize,
-        genomeAssay = genomeAssay,
-        offsetPseudocount = offsetPseudocount,
-        referenceLevels = referenceLevels,
-        randomSlope = randomSlope,
-        keepFits = keepFits,
-        path = c("gene_to_ko", "ko_to_module"),
-        feature_label = "module",
-        fit_model_name = "module_random_slope_model"
-    )
-}
-
-#' Aggregate Gene RNA to Pathway-within-Genome Counts
-#'
-#' `aggregateToPathwayGenome()` collapses a gene-level assay to pathway/genome
-#' pairs by following the functional path `gene_to_ko -> ko_to_pathway`. The
-#' returned rows represent pathway-within-genome observations that can be used
-#' in pathway-level mixed models.
-#'
-#' Because KO-to-pathway membership can be many-to-many, the same gene can
-#' contribute to multiple pathways. `membershipMode = "duplicate"` carries the
-#' full count into each mapped pathway/genome observation and is appropriate
-#' for the question "how much RNA is assigned to this pathway?". In contrast,
-#' `membershipMode = "exclusive"` keeps only genes whose final pathway mapping
-#' is unique, which is more conservative and avoids duplicated counts entirely.
-#'
-#' @param x An `MTTKExperiment`.
-#' @param assay A single gene-level assay name to aggregate.
-#' @param membershipMode How to handle many-to-many set memberships.
-#'   `"duplicate"` carries a gene's RNA into every mapped pathway, while
-#'   `"exclusive"` keeps only uniquely mapped genes.
-#'
-#' @return A `SummarizedExperiment` with one row per pathway/genome pair and one
-#'   column per sample.
-#'
-#' @examples
-#' x <- makeExampleMTTKExperiment()
-#' pathway_genome <- aggregateToPathwayGenome(x)
-#' pathway_genome
-#' SummarizedExperiment::rowData(pathway_genome)[, c("pathway_id", "genome_id")]
-#'
-#' @export
-aggregateToPathwayGenome <- function(
-    x,
-    assay = "rna_gene_counts",
-    membershipMode = c("duplicate", "exclusive")
-) {
-    if (!methods::is(x, "MTTKExperiment")) {
-        stop("'x' must be an MTTKExperiment.", call. = FALSE)
-    }
-
-    assay_name <- .normalize_analysis_assays(x, assay)
-    if (length(assay_name) != 1L) {
-        stop("'assay' must be a single gene-level assay name.", call. = FALSE)
-    }
-
-    .aggregate_rna_by_feature_genome(
-        x = x,
-        assay_name = assay_name,
-        path = c("gene_to_ko", "ko_to_pathway"),
-        feature_label = "pathway",
-        membership_mode = match.arg(membershipMode)
-    )
-}
-
-#' Build a Pathway Mixed-Model Data Table
-#'
-#' `makePathwayMixedModelData()` materializes the long-form observation table
-#' used by [fitPathwayMixedModel()]. Each row corresponds to one
-#' pathway/genome/sample observation, with RNA counts, sample-level covariates,
-#' and optional genome-abundance offsets aligned and ready for model fitting.
-#'
-#' @inheritParams makeKOMixedModelData
-#' @inheritParams aggregateToPathwayGenome
-#'
-#' @return An `S4Vectors::DataFrame` with one row per pathway/genome/sample
-#'   observation.
-#'
-#' @examples
-#' x <- makeExampleMTTKExperiment()
-#' model_data <- makePathwayMixedModelData(x, variable = "condition")
-#' model_data
-#'
-#' @export
-makePathwayMixedModelData <- function(
-    x,
-    variable = NULL,
-    formula = NULL,
-    term = NULL,
-    assay = "rna_gene_counts",
-    libraryOffset = TRUE,
-    genomeOffset = NULL,
-    membershipMode = c("duplicate", "exclusive"),
-    libSize = NULL,
-    genomeAssay = "dna_genome_counts",
-    offsetPseudocount = 1,
-    referenceLevels = NULL
-) {
-    membershipMode <- match.arg(membershipMode)
-    model_spec <- .normalize_model_spec(
-        x = x,
-        variable = variable,
-        formula = formula,
-        term = term,
-        referenceLevels = referenceLevels,
-        allow_formula = TRUE,
-        allow_random_slope = FALSE
-    )
-    .make_feature_mixed_model_data(
-        x = x,
-        model_spec = model_spec,
-        assay = assay,
-        libraryOffset = libraryOffset,
-        genomeOffset = genomeOffset,
-        membershipMode = membershipMode,
-        libSize = libSize,
-        genomeAssay = genomeAssay,
-        offsetPseudocount = offsetPseudocount,
-        path = c("gene_to_ko", "ko_to_pathway"),
-        feature_label = "pathway"
-    )
-}
-
-#' Fit a Pathway-Level Mixed Model
-#'
-#' `fitPathwayMixedModel()` fits one negative-binomial mixed model per pathway
-#' using `glmmTMB`. Gene-level RNA counts are first aggregated to
-#' pathway-within-genome observations by following `gene_to_ko -> ko_to_pathway`,
-#' then each pathway is modeled across genomes and samples.
-#'
-#' This workflow is intended for the total-activity question: does the summed
-#' RNA assigned to a pathway shift across samples after accounting for genome
-#' structure and optional genome abundance? For the different question of
-#' whether the KO-level effects assigned to a pathway show a coherent direction
-#' of change, use [fitPathwayMetaAnalysis()] instead.
-#'
-#' `membershipMode = "duplicate"` answers that question in terms of all RNA
-#' assigned to the pathway, even if the same KO contributes to multiple
-#' pathways. `membershipMode = "exclusive"` instead restricts the analysis to
-#' uniquely assigned memberships, which avoids duplicated counts but may remove
-#' many genes when pathway overlap is dense.
-#'
-#' `libraryOffset` controls whether the model includes
-#' `offset(log(lib_size))`. `genomeOffset` controls whether the model includes
-#' `offset(log(genome_abundance + offsetPseudocount))`. The genome random
-#' effect `(1 | genome_id)` is part of this workflow regardless of the offset
-#' settings.
-#'
-#' @inheritParams fitKOMixedModel
-#' @inheritParams aggregateToPathwayGenome
-#'
-#' @return An `MTTKFit` with one row per pathway.
-#'
-#' @examples
-#' if (requireNamespace("glmmTMB", quietly = TRUE)) {
-#'     x <- makeExampleMTTKExperiment()
-#'     fit <- fitPathwayMixedModel(x, variable = "condition")
-#'     fit
-#' }
-#'
-#' @export
-fitPathwayMixedModel <- function(
-    x,
-    variable = NULL,
-    formula = NULL,
-    term = NULL,
-    assay = "rna_gene_counts",
-    libraryOffset = TRUE,
-    genomeOffset = NULL,
-    membershipMode = c("duplicate", "exclusive"),
-    libSize = NULL,
-    genomeAssay = "dna_genome_counts",
-    offsetPseudocount = 1,
-    referenceLevels = NULL,
-    keepFits = FALSE
-) {
-    membershipMode <- match.arg(membershipMode)
-    .fit_feature_mixed_model(
-        x = x,
-        variable = variable,
-        formula = formula,
-        term = term,
-        assay = assay,
-        libraryOffset = libraryOffset,
-        genomeOffset = genomeOffset,
-        membershipMode = membershipMode,
-        libSize = libSize,
-        genomeAssay = genomeAssay,
-        offsetPseudocount = offsetPseudocount,
-        referenceLevels = referenceLevels,
-        keepFits = keepFits,
-        path = c("gene_to_ko", "ko_to_pathway"),
-        feature_label = "pathway",
-        fit_model_name = "pathway_mixed_model"
-    )
-}
-
-#' Fit a Pathway-Level Genome-Group Interaction Model
-#'
-#' `fitPathwayGroupInteractionModel()` fits one negative-binomial mixed model
-#' per pathway using `glmmTMB`, with a genome random intercept and a fixed
-#' interaction between the selected sample-level effect and a two-level genome
-#' grouping variable from `genomeData(x)`.
-#'
-#' This workflow is intended for the direct question: does the pathway response
-#' differ between two genome groups after accounting for genome nesting,
-#' optional genome abundance, and any covariates included in the fixed-effects
-#' formula?
-#'
-#' @inheritParams fitPathwayMixedModel
-#' @param group A single column name from `genomeData(x)` defining the genome
-#'   groups to compare.
-#' @param groupLevels Optional character vector of length 2 giving the genome
-#'   group reference and contrast levels. If `NULL`, the grouping column must
-#'   contain exactly two usable groups.
-#'
-#' @return An `MTTKFit` with one row per pathway.
-#'
-#' @examples
-#' if (requireNamespace("glmmTMB", quietly = TRUE)) {
-#'     x <- makeShowcaseMTTKExperiment()
-#'     fit <- fitPathwayGroupInteractionModel(
-#'         x,
-#'         variable = "condition",
-#'         group = "domain"
-#'     )
-#'     fit
-#' }
-#'
-#' @export
-fitPathwayGroupInteractionModel <- function(
-    x,
-    variable = NULL,
-    formula = NULL,
-    term = NULL,
-    group,
-    groupLevels = NULL,
-    assay = "rna_gene_counts",
-    libraryOffset = TRUE,
-    genomeOffset = NULL,
-    membershipMode = c("duplicate", "exclusive"),
-    libSize = NULL,
-    genomeAssay = "dna_genome_counts",
-    offsetPseudocount = 1,
-    referenceLevels = NULL,
-    keepFits = FALSE
-) {
-    membershipMode <- match.arg(membershipMode)
-    .fit_feature_group_interaction_model(
-        x = x,
-        variable = variable,
-        formula = formula,
-        term = term,
-        group = group,
-        groupLevels = groupLevels,
-        assay = assay,
-        libraryOffset = libraryOffset,
-        genomeOffset = genomeOffset,
-        membershipMode = membershipMode,
-        libSize = libSize,
-        genomeAssay = genomeAssay,
-        offsetPseudocount = offsetPseudocount,
-        referenceLevels = referenceLevels,
-        keepFits = keepFits,
-        path = c("gene_to_ko", "ko_to_pathway"),
-        feature_label = "pathway",
-        fit_model_name = "pathway_group_interaction_model"
-    )
-}
-
-#' Fit a Pathway-Level Random-Slope Mixed Model
-#'
-#' `fitPathwayRandomSlopeModel()` fits one negative-binomial mixed model per
-#' pathway using `glmmTMB`, with both a genome random intercept and a
-#' genome-specific random slope for the selected sample variable.
-#'
-#' Gene-level RNA counts are first aggregated to pathway-within-genome
-#' observations by following `gene_to_ko -> ko_to_pathway`. The fitted model
-#' then estimates an overall pathway-level effect together with genome-specific
-#' deviations around that pathway effect.
-#'
-#' This workflow is intended for the question: does the same pathway show
-#' similar or heterogeneous condition-associated responses across genomes? For
-#' the different higher-level question of whether KO-level pathway members show
-#' a coherent direction of change without re-aggregating counts, use
-#' [fitPathwayMetaAnalysis()] instead.
-#'
-#' `membershipMode = "duplicate"` answers that question in terms of all RNA
-#' assigned to the pathway, even if the same KO contributes to multiple
-#' pathways. `membershipMode = "exclusive"` instead restricts the analysis to
-#' uniquely assigned memberships.
-#'
-#' Genome-specific conditional pathway effects can be extracted with
-#' [pathwayGenomeEffects()].
-#'
-#' @inheritParams fitPathwayMixedModel
-#' @param randomSlope Optional sample-level variable whose genome-specific slope
-#'   should be estimated. When `variable` is supplied, MTTK uses that variable.
-#'   When `formula` is supplied, `randomSlope` can be omitted only if MTTK can
-#'   infer a single tested variable unambiguously.
-#'
-#' @return An `MTTKFit` with one row per pathway. The returned fit also stores
-#'   pathway-by-genome conditional effects that can be extracted with
-#'   [pathwayGenomeEffects()].
-#'
-#' @examples
-#' if (requireNamespace("glmmTMB", quietly = TRUE)) {
-#'     x <- makeExampleMTTKExperiment()
-#'     fit <- fitPathwayRandomSlopeModel(x, variable = "condition")
-#'     fit
-#'     pathwayGenomeEffects(fit)
-#' }
-#'
-#' @export
-fitPathwayRandomSlopeModel <- function(
-    x,
-    variable = NULL,
-    formula = NULL,
-    term = NULL,
-    assay = "rna_gene_counts",
-    libraryOffset = TRUE,
-    genomeOffset = NULL,
-    membershipMode = c("duplicate", "exclusive"),
-    libSize = NULL,
-    genomeAssay = "dna_genome_counts",
-    offsetPseudocount = 1,
-    referenceLevels = NULL,
-    randomSlope = NULL,
-    keepFits = FALSE
-) {
-    membershipMode <- match.arg(membershipMode)
-    .fit_feature_random_slope_model(
-        x = x,
-        variable = variable,
-        formula = formula,
-        term = term,
-        assay = assay,
-        libraryOffset = libraryOffset,
-        genomeOffset = genomeOffset,
-        membershipMode = membershipMode,
-        libSize = libSize,
-        genomeAssay = genomeAssay,
-        offsetPseudocount = offsetPseudocount,
-        referenceLevels = referenceLevels,
-        randomSlope = randomSlope,
-        keepFits = keepFits,
-        path = c("gene_to_ko", "ko_to_pathway"),
-        feature_label = "pathway",
-        fit_model_name = "pathway_random_slope_model"
-    )
-}
-
-.prepare_genome_offset_inputs <- function(
-    x,
-    response_counts,
-    response_assay,
-    libraryOffset,
-    genomeOffset,
-    libSize,
-    genomeAssay,
-    offsetPseudocount
-) {
-    if (!is.numeric(offsetPseudocount) ||
-        length(offsetPseudocount) != 1L ||
-        is.na(offsetPseudocount) ||
-        offsetPseudocount < 0) {
-        stop("'offsetPseudocount' must be a single non-negative numeric value.", call. = FALSE)
-    }
-
-    offset_flags <- .normalize_offset_flags(
-        x = x,
-        libraryOffset = libraryOffset,
-        genomeOffset = genomeOffset,
-        genomeAssay = genomeAssay
-    )
-
-    lib_size <- if (offset_flags$libraryOffset) {
-        .normalize_genome_model_lib_size(
-            x = x,
-            response_counts = response_counts,
-            response_assay = response_assay,
-            libSize = libSize
-        )
-    } else {
-        list(
-            values = stats::setNames(rep(NA_real_, ncol(response_counts)), colnames(response_counts)),
-            source = NA_character_
-        )
-    }
-
-    normalized_genome_assay <- if (offset_flags$genomeOffset) {
-        .normalize_genome_analysis_assay(x, assay = genomeAssay)
-    } else {
-        NA_character_
-    }
-
-    list(
-        libraryOffset = offset_flags$libraryOffset,
-        genomeOffset = offset_flags$genomeOffset,
-        specification = offset_flags$specification,
-        libSize = lib_size,
-        genomeAssay = normalized_genome_assay,
-        offsetPseudocount = if (offset_flags$genomeOffset) offsetPseudocount else NA_real_
-    )
-}
-
-.build_genome_model_observations <- function(
-    x,
-    model_spec,
-    specification,
-    response_counts,
-    genome_summary,
-    response_assay,
-    response_source_assay,
-    response_source_level,
-    lib_size,
-    genome_assay,
-    offset_pseudocount
-) {
-    sample_ids <- colnames(response_counts)
-    genome_ids <- rownames(response_counts)
-
-    if (!("genome_id" %in% names(genome_summary))) {
-        genome_summary$genome_id <- genome_ids
-    }
-    rownames(genome_summary) <- genome_ids
-
-    obs <- expand.grid(
-        genome_id = genome_ids,
-        sample_id = sample_ids,
-        KEEP.OUT.ATTRS = FALSE,
-        stringsAsFactors = FALSE
-    )
-    obs$rna_count <- as.numeric(as.vector(response_counts))
-
-    matched_genomes <- match(obs$genome_id, genome_ids)
-    summary_columns <- setdiff(names(genome_summary), "genome_id")
-    for (column_name in summary_columns) {
-        obs[[column_name]] <- S4Vectors::decode(genome_summary[[column_name]])[matched_genomes]
-    }
-
-    predictor_frame <- model_spec$sampleData[obs$sample_id, , drop = FALSE]
-    predictor_names <- names(predictor_frame)
-    for (column_name in predictor_names) {
-        values <- predictor_frame[[column_name]]
-        if (is.factor(values)) {
-            obs[[column_name]] <- factor(values, levels = levels(values))
-        } else {
-            obs[[column_name]] <- values
-        }
-    }
-
-    if (.specification_uses_library_offset(specification)) {
-        obs$lib_size <- as.numeric(lib_size$values[obs$sample_id])
-    }
-
-    if (.specification_uses_genome_offset(specification)) {
-        genome_mat <- SummarizedExperiment::assay(
-            genomeExperiment(x),
-            genome_assay,
-            withDimnames = TRUE
-        )
-        matched_offset_genomes <- match(obs$genome_id, rownames(genome_mat))
-        matched_samples <- match(obs$sample_id, colnames(genome_mat))
-
-        if (anyNA(matched_offset_genomes) || anyNA(matched_samples)) {
-            stop(
-                "Every genome/sample observation must be present in the selected genome assay.",
-                call. = FALSE
-            )
-        }
-
-        obs$genome_abundance <- as.numeric(genome_mat[cbind(matched_offset_genomes, matched_samples)])
-        obs$genome_abundance_offset <- obs$genome_abundance + offset_pseudocount
-    }
-
-    out <- S4Vectors::DataFrame(obs, check.names = FALSE)
-    S4Vectors::metadata(out)$mttk_genome_model <- list(
-        variable = model_spec$variable,
-        variableType = model_spec$variableType,
-        referenceLevel = model_spec$referenceLevel,
-        contrastLevel = model_spec$contrastLevel,
-        effectLabel = model_spec$effectLabel,
-        fixedFormula = model_spec$fixedFormulaLabel,
-        availableTerms = model_spec$availableTerms,
-        testedTermInput = model_spec$testedTermInput,
-        testedTerm = model_spec$testedTerm,
-        testedVariable = model_spec$testedVariable,
-        specification = specification,
-        libraryOffset = .specification_uses_library_offset(specification),
-        genomeOffset = .specification_uses_genome_offset(specification),
-        responseAssay = response_assay,
-        sourceAssay = response_source_assay,
-        sourceLevel = response_source_level,
-        libSizeSource = if (.specification_uses_library_offset(specification)) {
-            lib_size$source
-        } else {
-            NA_character_
-        },
-        genomeAssay = if (.specification_uses_genome_offset(specification)) {
-            genome_assay
-        } else {
-            NA_character_
-        },
-        offsetPseudocount = if (.specification_uses_genome_offset(specification)) {
-            offset_pseudocount
-        } else {
-            NA_real_
-        },
-        genomeSummary = genome_summary
-    )
-
-    out
-}
-
-.empty_genome_model_row <- function(genome_id, genome_summary, variable_info) {
-    columns <- list(genome_id = genome_id)
-    extra_columns <- setdiff(names(genome_summary), "genome_id")
-
-    for (column_name in extra_columns) {
-        columns[[column_name]] <- S4Vectors::decode(genome_summary[[column_name]])[[1L]]
-    }
-
-    do.call(
-        S4Vectors::DataFrame,
-        c(
-            columns,
-            list(
-                tested_term = NA_character_,
-                variable_type = variable_info$type,
-                reference_level = variable_info$referenceLevel,
-                contrast_level = variable_info$contrastLevel,
-                effect_label = variable_info$effectLabel,
-                estimate = NA_real_,
-                std_error = NA_real_,
-                statistic = NA_real_,
-                p_value = NA_real_,
-                q_value = NA_real_,
-                intercept_estimate = NA_real_,
-                intercept_std_error = NA_real_,
-                n_observations = NA_integer_,
-                n_nonzero_observations = NA_integer_,
-                AIC = NA_real_,
-                BIC = NA_real_,
-                logLik = NA_real_,
-                pd_hess = NA,
-                optimizer_convergence = NA_integer_,
-                warning_message = NA_character_,
-                error_message = NA_character_,
-                status = NA_character_,
-                row.names = genome_id
-            )
-        )
-    )
-}
-
-.fit_one_genome_model <- function(data, genome_id, genome_summary, variable_info, specification, keep_fits) {
-    row <- .empty_genome_model_row(
-        genome_id = genome_id,
-        genome_summary = genome_summary,
-        variable_info = variable_info
-    )
-    row$n_observations <- nrow(data)
-    row$n_nonzero_observations <- sum(data$rna_count > 0)
-
-    if (nrow(data) == 0L) {
-        row$status <- "skipped"
-        row$error_message <- "No observations were available for the genome."
-        return(list(result = row, model = NULL))
-    }
-
-    if (all(data$rna_count == 0)) {
-        row$status <- "skipped"
-        row$error_message <- "All genome-level counts were zero."
-        return(list(result = row, model = NULL))
-    }
-
-    warning_messages <- character()
-    formula <- .gene_model_formula(model_spec = variable_info$modelSpec, specification = specification)
-    fit <- tryCatch(
-        withCallingHandlers(
-            glmmTMB::glmmTMB(
-                formula = formula,
-                data = data,
-                family = glmmTMB::nbinom2(link = "log")
-            ),
-            warning = function(w) {
-                warning_messages <<- c(warning_messages, conditionMessage(w))
-                invokeRestart("muffleWarning")
-            }
-        ),
-        error = identity
-    )
-
-    if (inherits(fit, "error")) {
-        row$status <- "error"
-        row$error_message <- conditionMessage(fit)
-        row$warning_message <- if (length(warning_messages) > 0L) {
-            paste(unique(warning_messages), collapse = " | ")
-        } else {
-            NA_character_
-        }
-        return(list(result = row, model = NULL))
-    }
-
-    coefficient_table <- summary(fit)$coefficients$cond
-    tested_term <- tryCatch(
-        .resolve_fitted_tested_term(variable_info$modelSpec, coefficient_table),
-        error = identity
-    )
-
-    if (inherits(tested_term, "error")) {
-        row$status <- "error"
-        row$error_message <- conditionMessage(tested_term)
-        row$warning_message <- if (length(warning_messages) > 0L) {
-            paste(unique(warning_messages), collapse = " | ")
-        } else {
-            NA_character_
-        }
-        return(list(result = row, model = if (keep_fits) fit else NULL))
-    }
-
-    statistic_col <- intersect(colnames(coefficient_table), c("z value", "t value"))[1L]
-    p_value_col <- grep("^Pr\\(", colnames(coefficient_table), value = TRUE)[1L]
-    tested_row <- coefficient_table[tested_term, , drop = FALSE]
-    intercept_row <- coefficient_table["(Intercept)", , drop = FALSE]
-    term_info <- .resolved_term_info(variable_info$modelSpec, tested_term = tested_term)
-
-    row$tested_term <- tested_term
-    row$variable_type <- term_info$type
-    row$reference_level <- term_info$referenceLevel
-    row$contrast_level <- term_info$contrastLevel
-    row$effect_label <- term_info$effectLabel
-    row$estimate <- as.numeric(tested_row[, "Estimate"])
-    row$std_error <- as.numeric(tested_row[, "Std. Error"])
-    row$statistic <- as.numeric(tested_row[, statistic_col])
-    row$p_value <- as.numeric(tested_row[, p_value_col])
-    row$intercept_estimate <- as.numeric(intercept_row[, "Estimate"])
-    row$intercept_std_error <- as.numeric(intercept_row[, "Std. Error"])
-    row$AIC <- stats::AIC(fit)
-    row$BIC <- stats::BIC(fit)
-    row$logLik <- as.numeric(stats::logLik(fit))
-    row$pd_hess <- if (!is.null(fit$sdr$pdHess)) isTRUE(fit$sdr$pdHess) else NA
-    row$optimizer_convergence <- if (!is.null(fit$fit$convergence)) {
-        as.integer(fit$fit$convergence)
-    } else {
-        NA_integer_
-    }
-    row$warning_message <- if (length(warning_messages) > 0L) {
-        paste(unique(warning_messages), collapse = " | ")
-    } else {
-        NA_character_
-    }
-    row$error_message <- NA_character_
-    row$status <- "ok"
-
-    list(
-        result = row,
-        model = if (keep_fits) fit else NULL
-    )
-}
-
-#' Build a Genome-Level Model Data Table
-#'
-#' `makeGenomeModelData()` materializes the long-form observation table used by
-#' [fitGenomeModel()]. Each row corresponds to one genome/sample observation,
-#' with genome-level RNA counts, sample-level covariates, genome metadata, and
-#' an optional genome-abundance offset aligned and ready for model fitting.
-#'
-#' This workflow is intended for the question of which genomes change across
-#' conditions or are associated with a continuous variable.
-#'
-#' @param x An `MTTKExperiment`.
-#' @param variable A single sample-level column name from `colData(x)` for the
-#'   simple one-variable interface. The column must be numeric or a factor with
-#'   exactly two levels. Supply exactly one of `variable` or `formula`.
-#' @param formula Optional one-sided or two-sided fixed-effect formula for the
-#'   sample-level covariates, for example `~ condition + pH` or
-#'   `rna_count ~ condition + pH`. Offsets are added internally by MTTK.
-#'   Supply exactly one of `variable` or `formula`.
-#' @param term Optional fixed-effect term to extract from a formula-based fit.
-#'   This is required when the fixed-effect formula defines more than one tested
-#'   term.
-#' @param assay Genome-level or gene-level assay name used as the RNA response.
-#'   Use `NULL` to prefer `"rna_genome_counts"` when present and otherwise
-#'   aggregate `"rna_gene_counts"` to genomes.
-#' @param libraryOffset Logical; if `TRUE`, include `offset(log(lib_size))`.
-#' @param libSize Library-size offset specification. Use `NULL` to compute
-#'   `colSums()` of the resolved genome-level response assay, a single
-#'   `colData(x)` column name, or a numeric vector with one value per sample.
-#' @param genomeOffset Logical; if `TRUE`, include
-#'   `offset(log(genome_abundance + offsetPseudocount))`. If `NULL` (the
-#'   default), MTTK uses genome-abundance normalization when `genomeAssay` is
-#'   available in `genomeExperiment(x)`.
-#' @param genomeAssay Genome-level assay used when `genomeOffset = TRUE`.
-#' @param offsetPseudocount Non-negative pseudocount added to genome abundance
-#'   before log-offset calculation.
-#' @param referenceLevels Optional named list or named character vector setting
-#'   the reference levels of factor-like sample covariates before model fitting.
-#'
-#' @return An `S4Vectors::DataFrame` with one row per genome/sample observation.
-#'
-#' @examples
-#' x <- makeExampleMTTKExperiment()
-#' genome_model_data <- makeGenomeModelData(x, variable = "condition")
-#' genome_model_data
-#'
-#' @export
-makeGenomeModelData <- function(
-    x,
-    variable = NULL,
-    formula = NULL,
-    term = NULL,
-    assay = NULL,
-    libraryOffset = TRUE,
-    genomeOffset = NULL,
-    libSize = NULL,
-    genomeAssay = "dna_genome_counts",
-    offsetPseudocount = 1,
-    referenceLevels = NULL
-) {
-    if (!methods::is(x, "MTTKExperiment")) {
-        stop("'x' must be an MTTKExperiment.", call. = FALSE)
-    }
-
-    model_spec <- .normalize_model_spec(
-        x = x,
-        variable = variable,
-        formula = formula,
-        term = term,
-        referenceLevels = referenceLevels,
-        allow_formula = TRUE,
-        allow_random_slope = FALSE
-    )
-
-    response_state <- .resolve_genome_model_response(x, assay = assay)
-    offset_state <- .prepare_genome_offset_inputs(
-        x = x,
-        response_counts = response_state$counts,
-        response_assay = response_state$responseAssay,
-        libraryOffset = libraryOffset,
-        genomeOffset = genomeOffset,
-        libSize = libSize,
-        genomeAssay = genomeAssay,
-        offsetPseudocount = offsetPseudocount
-    )
-
-    .build_genome_model_observations(
-        x = x,
-        model_spec = model_spec,
-        specification = offset_state$specification,
-        response_counts = response_state$counts,
-        genome_summary = response_state$genomeSummary,
-        response_assay = response_state$responseAssay,
-        response_source_assay = response_state$sourceAssay,
-        response_source_level = response_state$sourceLevel,
-        lib_size = offset_state$libSize,
-        genome_assay = offset_state$genomeAssay,
-        offset_pseudocount = offset_state$offsetPseudocount
-    )
-}
-
-#' Fit a Genome-Level Model
-#'
-#' `fitGenomeModel()` fits one negative-binomial model per genome using
-#' `glmmTMB`. The response can come from a stored genome-level RNA assay or by
-#' aggregating a gene-level assay to genomes on the fly.
-#'
-#' `libraryOffset` controls whether the model includes
-#' `offset(log(lib_size))`. `genomeOffset` controls whether the model includes
-#' `offset(log(genome_abundance + offsetPseudocount))`.
-#'
-#' This workflow is intended for the question of which genomes respond across
-#' conditions or are associated with a continuous variable.
-#'
-#' @inheritParams makeGenomeModelData
-#' @param keepFits Logical; if `TRUE`, store the backend `glmmTMB` model objects
-#'   in the returned `MTTKFit`.
-#'
-#' @return An `MTTKFit` with one row per genome.
-#'
-#' @examples
-#' if (requireNamespace("glmmTMB", quietly = TRUE)) {
-#'     x <- makeExampleMTTKExperiment()
-#'     fit <- fitGenomeModel(x, variable = "condition")
-#'     fit
-#'     significantResults(fit)
-#' }
-#'
-#' @export
-fitGenomeModel <- function(
-    x,
-    variable = NULL,
-    formula = NULL,
-    term = NULL,
-    assay = NULL,
-    libraryOffset = TRUE,
-    genomeOffset = NULL,
-    libSize = NULL,
-    genomeAssay = "dna_genome_counts",
-    offsetPseudocount = 1,
-    referenceLevels = NULL,
-    keepFits = FALSE
-) {
-    if (!methods::is(x, "MTTKExperiment")) {
-        stop("'x' must be an MTTKExperiment.", call. = FALSE)
-    }
-
-    if (!requireNamespace("glmmTMB", quietly = TRUE)) {
-        stop(
-            "The 'glmmTMB' package must be installed to use fitGenomeModel().",
-            call. = FALSE
-        )
-    }
-
-    if (!is.logical(keepFits) || length(keepFits) != 1L || is.na(keepFits)) {
-        stop("'keepFits' must be TRUE or FALSE.", call. = FALSE)
-    }
-
-    model_spec <- .normalize_model_spec(
-        x = x,
-        variable = variable,
-        formula = formula,
-        term = term,
-        referenceLevels = referenceLevels,
-        allow_formula = TRUE,
-        allow_random_slope = FALSE
-    )
-    .require_model_spec_term(model_spec)
-
-    model_data <- makeGenomeModelData(
-        x = x,
-        variable = variable,
-        formula = formula,
-        term = term,
-        assay = assay,
-        libraryOffset = libraryOffset,
-        genomeOffset = genomeOffset,
-        libSize = libSize,
-        genomeAssay = genomeAssay,
-        offsetPseudocount = offsetPseudocount,
-        referenceLevels = referenceLevels
-    )
-
-    observations <- as.data.frame(model_data)
-    model_state <- S4Vectors::metadata(model_data)$mttk_genome_model
-    specification <- model_state$specification
-    genome_summary <- model_state$genomeSummary
-    response_assay <- model_state$responseAssay
-    genome_assay <- model_state$genomeAssay
-    variable_info <- list(
-        type = model_state$variableType,
-        referenceLevel = model_state$referenceLevel,
-        contrastLevel = model_state$contrastLevel,
-        effectLabel = model_state$effectLabel,
-        modelSpec = model_spec
-    )
-    genome_ids <- rownames(genome_summary)
-
-    fitted_rows <- lapply(genome_ids, function(genome_id) {
-        data_genome <- observations[observations$genome_id == genome_id, , drop = FALSE]
-        .fit_one_genome_model(
-            data = data_genome,
-            genome_id = genome_id,
-            genome_summary = genome_summary[genome_id, , drop = FALSE],
-            variable_info = variable_info,
-            specification = specification,
-            keep_fits = keepFits
-        )
-    })
-
-    results <- do.call(
-        rbind,
-        lapply(fitted_rows, function(one_fit) one_fit$result)
-    )
-    rownames(results) <- genome_ids
-
-    ok_rows <- !is.na(results$p_value) & results$status == "ok"
-    results$q_value <- NA_real_
-    results$q_value[ok_rows] <- stats::p.adjust(results$p_value[ok_rows], method = "BH")
-
-    stored_models <- if (keepFits) {
-        stats::setNames(
-            lapply(fitted_rows, function(one_fit) one_fit$model),
-            genome_ids
-        )
-    } else {
-        list()
-    }
-
-    formula <- .gene_model_formula(
-        model_spec = variable_info$modelSpec,
-        specification = specification
-    )
-    info <- list(
-        backend = "glmmTMB",
-        model = "genome_model",
-        featureType = "genome",
-        featureIdColumn = "genome_id",
-        variable = model_state$variable,
-        variableType = model_state$variableType,
-        referenceLevel = model_state$referenceLevel,
-        contrastLevel = model_state$contrastLevel,
-        effectLabel = model_state$effectLabel,
-        testedTermInput = model_state$testedTermInput,
-        testedTerm = model_state$testedTerm,
-        testedVariable = model_state$testedVariable,
-        fixedEffectsFormula = model_state$fixedFormula,
-        specification = specification,
-        libraryOffset = model_state$libraryOffset,
-        genomeOffset = model_state$genomeOffset,
-        responseAssay = response_assay,
-        sourceAssay = model_state$sourceAssay,
-        sourceLevel = model_state$sourceLevel,
-        libSizeSource = model_state$libSizeSource,
-        genomeAssay = genome_assay,
-        offsetPseudocount = model_state$offsetPseudocount,
-        family = "nbinom2",
-        formula = paste(deparse(formula), collapse = " "),
-        n_features = nrow(results),
-        n_ok = sum(results$status == "ok"),
-        n_skipped = sum(results$status == "skipped"),
-        n_error = sum(results$status == "error")
-    )
-
-    MTTKFit(
-        results = results,
-        info = info,
-        models = stored_models
-    )
-}
-
-.build_gene_model_observations <- function(
-    x,
-    model_spec,
-    specification,
-    assay_name,
-    lib_size,
-    genome_assay,
-    offset_pseudocount
-) {
-    counts <- SummarizedExperiment::assay(x, assay_name, withDimnames = TRUE)
-    row_data <- SummarizedExperiment::rowData(x)
-    gene_ids <- rownames(counts)
-    sample_ids <- colnames(counts)
-
-    gene_summary <- S4Vectors::DataFrame(
-        gene_id = gene_ids,
-        genome_id = as.character(row_data$genome_id),
-        row.names = gene_ids
-    )
-    if ("gene_name" %in% names(row_data)) {
-        gene_summary$gene_name <- as.character(row_data$gene_name)
-    }
-
-    obs <- expand.grid(
-        gene_id = gene_ids,
-        sample_id = sample_ids,
-        KEEP.OUT.ATTRS = FALSE,
-        stringsAsFactors = FALSE
-    )
-    obs$rna_count <- as.numeric(as.vector(counts))
-
-    matched_genes <- match(obs$gene_id, gene_ids)
-    obs$genome_id <- as.character(gene_summary$genome_id[matched_genes])
-    if ("gene_name" %in% names(gene_summary)) {
-        obs$gene_name <- as.character(gene_summary$gene_name[matched_genes])
-    }
-
-    predictor_frame <- model_spec$sampleData[obs$sample_id, , drop = FALSE]
-    predictor_names <- names(predictor_frame)
-    for (column_name in predictor_names) {
-        values <- predictor_frame[[column_name]]
-        if (is.factor(values)) {
-            obs[[column_name]] <- factor(values, levels = levels(values))
-        } else {
-            obs[[column_name]] <- values
-        }
-    }
-
-    if (.specification_uses_library_offset(specification)) {
-        obs$lib_size <- as.numeric(lib_size$values[obs$sample_id])
-    }
-
-    if (.specification_uses_genome_offset(specification)) {
-        genome_mat <- SummarizedExperiment::assay(
-            genomeExperiment(x),
-            genome_assay,
-            withDimnames = TRUE
-        )
-        matched_genomes <- match(obs$genome_id, rownames(genome_mat))
-        matched_samples <- match(obs$sample_id, colnames(genome_mat))
-
-        if (anyNA(matched_genomes) || anyNA(matched_samples)) {
-            stop(
-                "Every gene/sample observation must be present in the selected genome assay.",
-                call. = FALSE
-            )
-        }
-
-        obs$genome_abundance <- as.numeric(genome_mat[cbind(matched_genomes, matched_samples)])
-        obs$genome_abundance_offset <- obs$genome_abundance + offset_pseudocount
-    }
-
-    out <- S4Vectors::DataFrame(obs, check.names = FALSE)
-    S4Vectors::metadata(out)$mttk_gene_model <- list(
-        variable = model_spec$variable,
-        variableType = model_spec$variableType,
-        referenceLevel = model_spec$referenceLevel,
-        contrastLevel = model_spec$contrastLevel,
-        effectLabel = model_spec$effectLabel,
-        fixedFormula = model_spec$fixedFormulaLabel,
-        availableTerms = model_spec$availableTerms,
-        testedTermInput = model_spec$testedTermInput,
-        testedTerm = model_spec$testedTerm,
-        testedVariable = model_spec$testedVariable,
-        specification = specification,
-        libraryOffset = .specification_uses_library_offset(specification),
-        genomeOffset = .specification_uses_genome_offset(specification),
-        sourceAssay = assay_name,
-        libSizeSource = if (.specification_uses_library_offset(specification)) {
-            lib_size$source
-        } else {
-            NA_character_
-        },
-        genomeAssay = if (.specification_uses_genome_offset(specification)) {
-            genome_assay
-        } else {
-            NA_character_
-        },
-        offsetPseudocount = if (.specification_uses_genome_offset(specification)) {
-            offset_pseudocount
-        } else {
-            NA_real_
-        },
-        geneSummary = gene_summary
-    )
-
-    out
-}
-
-.empty_gene_model_row <- function(gene_id, gene_summary, variable_info) {
-    columns <- list(
-        gene_id = gene_id,
-        genome_id = as.character(gene_summary$genome_id[[1L]])
-    )
-    if ("gene_name" %in% names(gene_summary)) {
-        columns$gene_name <- as.character(gene_summary$gene_name[[1L]])
-    }
-
-    do.call(
-        S4Vectors::DataFrame,
-        c(
-            columns,
-            list(
-                tested_term = NA_character_,
-                variable_type = variable_info$type,
-                reference_level = variable_info$referenceLevel,
-                contrast_level = variable_info$contrastLevel,
-                effect_label = variable_info$effectLabel,
-                estimate = NA_real_,
-                std_error = NA_real_,
-                statistic = NA_real_,
-                p_value = NA_real_,
-                q_value = NA_real_,
-                intercept_estimate = NA_real_,
-                intercept_std_error = NA_real_,
-                n_observations = NA_integer_,
-                n_nonzero_observations = NA_integer_,
-                AIC = NA_real_,
-                BIC = NA_real_,
-                logLik = NA_real_,
-                pd_hess = NA,
-                optimizer_convergence = NA_integer_,
-                warning_message = NA_character_,
-                error_message = NA_character_,
-                status = NA_character_,
-                row.names = gene_id
-            )
-        )
-    )
-}
-
-.fit_one_gene_model <- function(data, gene_id, gene_summary, variable_info, model, keep_fits) {
-    row <- .empty_gene_model_row(
-        gene_id = gene_id,
-        gene_summary = gene_summary,
-        variable_info = variable_info
-    )
-    row$n_observations <- nrow(data)
-    row$n_nonzero_observations <- sum(data$rna_count > 0)
-
-    if (nrow(data) == 0L) {
-        row$status <- "skipped"
-        row$error_message <- "No observations were available for the gene."
-        return(list(result = row, model = NULL))
-    }
-
-    if (all(data$rna_count == 0)) {
-        row$status <- "skipped"
-        row$error_message <- "All gene-level counts were zero."
-        return(list(result = row, model = NULL))
-    }
-
-    warning_messages <- character()
-    formula <- .gene_model_formula(model_spec = variable_info$modelSpec, specification = model)
-    fit <- tryCatch(
-        withCallingHandlers(
-            glmmTMB::glmmTMB(
-                formula = formula,
-                data = data,
-                family = glmmTMB::nbinom2(link = "log")
-            ),
-            warning = function(w) {
-                warning_messages <<- c(warning_messages, conditionMessage(w))
-                invokeRestart("muffleWarning")
-            }
-        ),
-        error = identity
-    )
-
-    if (inherits(fit, "error")) {
-        row$status <- "error"
-        row$error_message <- conditionMessage(fit)
-        row$warning_message <- if (length(warning_messages) > 0L) {
-            paste(unique(warning_messages), collapse = " | ")
-        } else {
-            NA_character_
-        }
-        return(list(result = row, model = NULL))
-    }
-
-    coefficient_table <- summary(fit)$coefficients$cond
-    tested_term <- tryCatch(
-        .resolve_fitted_tested_term(variable_info$modelSpec, coefficient_table),
-        error = identity
-    )
-
-    if (inherits(tested_term, "error")) {
-        row$status <- "error"
-        row$error_message <- conditionMessage(tested_term)
-        row$warning_message <- if (length(warning_messages) > 0L) {
-            paste(unique(warning_messages), collapse = " | ")
-        } else {
-            NA_character_
-        }
-        return(list(result = row, model = if (keep_fits) fit else NULL))
-    }
-
-    statistic_col <- intersect(colnames(coefficient_table), c("z value", "t value"))[1L]
-    p_value_col <- grep("^Pr\\(", colnames(coefficient_table), value = TRUE)[1L]
-    tested_row <- coefficient_table[tested_term, , drop = FALSE]
-    intercept_row <- coefficient_table["(Intercept)", , drop = FALSE]
-    term_info <- .resolved_term_info(variable_info$modelSpec, tested_term = tested_term)
-
-    row$tested_term <- tested_term
-    row$variable_type <- term_info$type
-    row$reference_level <- term_info$referenceLevel
-    row$contrast_level <- term_info$contrastLevel
-    row$effect_label <- term_info$effectLabel
-    row$estimate <- as.numeric(tested_row[, "Estimate"])
-    row$std_error <- as.numeric(tested_row[, "Std. Error"])
-    row$statistic <- as.numeric(tested_row[, statistic_col])
-    row$p_value <- as.numeric(tested_row[, p_value_col])
-    row$intercept_estimate <- as.numeric(intercept_row[, "Estimate"])
-    row$intercept_std_error <- as.numeric(intercept_row[, "Std. Error"])
-    row$AIC <- stats::AIC(fit)
-    row$BIC <- stats::BIC(fit)
-    row$logLik <- as.numeric(stats::logLik(fit))
-    row$pd_hess <- if (!is.null(fit$sdr$pdHess)) isTRUE(fit$sdr$pdHess) else NA
-    row$optimizer_convergence <- if (!is.null(fit$fit$convergence)) {
-        as.integer(fit$fit$convergence)
-    } else {
-        NA_integer_
-    }
-    row$warning_message <- if (length(warning_messages) > 0L) {
-        paste(unique(warning_messages), collapse = " | ")
-    } else {
-        NA_character_
-    }
-    row$error_message <- NA_character_
-    row$status <- "ok"
-
-    list(
-        result = row,
-        model = if (keep_fits) fit else NULL
-    )
-}
-
-#' Build a Gene-Level Model Data Table
-#'
-#' `makeGeneModelData()` materializes the long-form observation table used by
-#' [fitGeneModel()]. Each row corresponds to one gene/sample observation, with
-#' gene-level RNA counts, sample-level covariates, and an optional
-#' parent-genome abundance offset aligned and ready for model fitting.
-#'
-#' This workflow is intended for gene-level differential expression or
-#' association analysis, where the question is which individual genes change
-#' across samples rather than which functions are associated across genomes.
-#'
-#' @param x An `MTTKExperiment`.
-#' @param variable A single sample-level column name from `colData(x)` for the
-#'   simple one-variable interface. The column must be numeric or a factor with
-#'   exactly two levels. Supply exactly one of `variable` or `formula`.
-#' @param formula Optional one-sided or two-sided fixed-effect formula for the
-#'   sample-level covariates, for example `~ condition + pH` or
-#'   `rna_count ~ condition + pH`. Offsets are added internally by MTTK.
-#'   Supply exactly one of `variable` or `formula`.
-#' @param term Optional fixed-effect term to extract from a formula-based fit.
-#'   This is required when the fixed-effect formula defines more than one tested
-#'   term.
-#' @param assay Gene-level assay name used as the RNA response.
-#' @param libraryOffset Logical; if `TRUE`, include `offset(log(lib_size))`.
-#' @param libSize Library-size offset specification. Use `NULL` to compute
-#'   `colSums(rnaGeneCounts(x))`, a single `colData(x)` column name, or a
-#'   numeric vector with one value per sample.
-#' @param genomeOffset Logical; if `TRUE`, include
-#'   `offset(log(genome_abundance + offsetPseudocount))`. If `NULL` (the
-#'   default), MTTK uses genome-abundance normalization when `genomeAssay` is
-#'   available in `genomeExperiment(x)`.
-#' @param genomeAssay Genome-level assay used when `genomeOffset = TRUE`.
-#' @param offsetPseudocount Non-negative pseudocount added to genome abundance
-#'   before log-offset calculation.
-#' @param referenceLevels Optional named list or named character vector setting
-#'   the reference levels of factor-like sample covariates before model fitting.
-#'
-#' @return An `S4Vectors::DataFrame` with one row per gene/sample observation.
-#'
-#' @examples
-#' x <- makeExampleMTTKExperiment()
-#' gene_model_data <- makeGeneModelData(x, variable = "condition")
-#' gene_model_data
-#'
-#' @export
-makeGeneModelData <- function(
-    x,
-    variable = NULL,
-    formula = NULL,
-    term = NULL,
-    assay = "rna_gene_counts",
-    libraryOffset = TRUE,
-    genomeOffset = NULL,
-    libSize = NULL,
-    genomeAssay = "dna_genome_counts",
-    offsetPseudocount = 1,
-    referenceLevels = NULL
-) {
-    if (!methods::is(x, "MTTKExperiment")) {
-        stop("'x' must be an MTTKExperiment.", call. = FALSE)
-    }
-
-    assay_name <- .normalize_analysis_assays(x, assay)
-    if (length(assay_name) != 1L) {
-        stop("'assay' must be a single gene-level assay name.", call. = FALSE)
-    }
-
-    model_spec <- .normalize_model_spec(
-        x = x,
-        variable = variable,
-        formula = formula,
-        term = term,
-        referenceLevels = referenceLevels,
-        allow_formula = TRUE,
-        allow_random_slope = FALSE
-    )
-
-    offset_state <- .prepare_offset_inputs(
-        x = x,
-        libraryOffset = libraryOffset,
-        genomeOffset = genomeOffset,
-        libSize = libSize,
-        genomeAssay = genomeAssay,
-        offsetPseudocount = offsetPseudocount
-    )
-
-    .build_gene_model_observations(
-        x = x,
-        model_spec = model_spec,
-        specification = offset_state$specification,
-        assay_name = assay_name,
-        lib_size = offset_state$libSize,
-        genome_assay = offset_state$genomeAssay,
-        offset_pseudocount = offset_state$offsetPseudocount
-    )
-}
-
-#' Fit a Gene-Level Model
-#'
-#' `fitGeneModel()` fits one negative-binomial model per gene using `glmmTMB`.
-#' This workflow is intended for the gene-level question of which individual
-#' genes change across conditions or are associated with a continuous variable.
-#'
-#' `libraryOffset` controls whether the model includes
-#' `offset(log(lib_size))`. `genomeOffset` controls whether the model includes
-#' `offset(log(genome_abundance + offsetPseudocount))`.
-#'
-#' In this workflow the parent genome is handled through the optional
-#' genome-abundance offset rather than as a random effect, because each gene is
-#' permanently assigned to one genome.
-#'
-#' @param x An `MTTKExperiment`.
-#' @param variable A single sample-level column name from `colData(x)` for the
-#'   simple one-variable interface. The column must be numeric or a factor with
-#'   exactly two levels. Supply exactly one of `variable` or `formula`.
-#' @param formula Optional one-sided or two-sided fixed-effect formula for the
-#'   sample-level covariates, for example `~ condition + pH` or
-#'   `rna_count ~ condition + pH`. Offsets are added internally by MTTK.
-#'   Supply exactly one of `variable` or `formula`.
-#' @param term Optional fixed-effect term to extract from a formula-based fit.
-#'   This is required when the fixed-effect formula defines more than one tested
-#'   term.
-#' @param assay Gene-level assay name used as the RNA response.
-#' @param libraryOffset Logical; if `TRUE`, include `offset(log(lib_size))`.
-#' @param libSize Library-size offset specification. Use `NULL` to compute
-#'   `colSums(rnaGeneCounts(x))`, a single `colData(x)` column name, or a
-#'   numeric vector with one value per sample.
-#' @param genomeOffset Logical; if `TRUE`, include
-#'   `offset(log(genome_abundance + offsetPseudocount))`. If `NULL` (the
-#'   default), MTTK uses genome-abundance normalization when `genomeAssay` is
-#'   available in `genomeExperiment(x)`.
-#' @param genomeAssay Genome-level assay used when `genomeOffset = TRUE`.
-#' @param offsetPseudocount Non-negative pseudocount added to genome abundance
-#'   before log-offset calculation.
-#' @param referenceLevels Optional named list or named character vector setting
-#'   the reference levels of factor-like sample covariates before model fitting.
-#' @param keepFits Logical; if `TRUE`, store the backend `glmmTMB` model objects
-#'   in the returned `MTTKFit`.
-#'
-#' @return An `MTTKFit` with one row per gene.
-#'
-#' @examples
-#' if (requireNamespace("glmmTMB", quietly = TRUE)) {
-#'     x <- makeExampleMTTKExperiment()
-#'     fit <- fitGeneModel(x, variable = "condition")
-#'     fit
-#'     significantResults(fit)
-#' }
-#'
-#' @export
-fitGeneModel <- function(
-    x,
-    variable = NULL,
-    formula = NULL,
-    term = NULL,
-    assay = "rna_gene_counts",
-    libraryOffset = TRUE,
-    genomeOffset = NULL,
-    libSize = NULL,
-    genomeAssay = "dna_genome_counts",
-    offsetPseudocount = 1,
-    referenceLevels = NULL,
-    keepFits = FALSE
-) {
-    if (!methods::is(x, "MTTKExperiment")) {
-        stop("'x' must be an MTTKExperiment.", call. = FALSE)
-    }
-
-    if (!requireNamespace("glmmTMB", quietly = TRUE)) {
-        stop(
-            "The 'glmmTMB' package must be installed to use fitGeneModel().",
-            call. = FALSE
-        )
-    }
-
-    if (!is.logical(keepFits) || length(keepFits) != 1L || is.na(keepFits)) {
-        stop("'keepFits' must be TRUE or FALSE.", call. = FALSE)
-    }
-
-    model_spec <- .normalize_model_spec(
-        x = x,
-        variable = variable,
-        formula = formula,
-        term = term,
-        referenceLevels = referenceLevels,
-        allow_formula = TRUE,
-        allow_random_slope = FALSE
-    )
-    .require_model_spec_term(model_spec)
-
-    model_data <- makeGeneModelData(
-        x = x,
-        variable = variable,
-        formula = formula,
-        term = term,
-        assay = assay,
-        libraryOffset = libraryOffset,
-        genomeOffset = genomeOffset,
-        libSize = libSize,
-        genomeAssay = genomeAssay,
-        offsetPseudocount = offsetPseudocount,
-        referenceLevels = referenceLevels
-    )
-
-    observations <- as.data.frame(model_data)
-    model_state <- S4Vectors::metadata(model_data)$mttk_gene_model
-    specification <- model_state$specification
-    gene_summary <- model_state$geneSummary
-    assay_name <- model_state$sourceAssay
-    genome_assay <- model_state$genomeAssay
-    variable_info <- list(
-        type = model_state$variableType,
-        referenceLevel = model_state$referenceLevel,
-        contrastLevel = model_state$contrastLevel,
-        effectLabel = model_state$effectLabel,
-        modelSpec = model_spec
-    )
-    gene_ids <- rownames(gene_summary)
-
-    fitted_rows <- lapply(gene_ids, function(gene_id) {
-        data_gene <- observations[observations$gene_id == gene_id, , drop = FALSE]
-        .fit_one_gene_model(
-            data = data_gene,
-            gene_id = gene_id,
-            gene_summary = gene_summary[gene_id, , drop = FALSE],
-            variable_info = variable_info,
-            model = specification,
-            keep_fits = keepFits
-        )
-    })
-
-    results <- do.call(
-        rbind,
-        lapply(fitted_rows, function(x) x$result)
-    )
-    rownames(results) <- gene_ids
-
-    ok_rows <- !is.na(results$p_value) & results$status == "ok"
-    results$q_value <- NA_real_
-    results$q_value[ok_rows] <- stats::p.adjust(results$p_value[ok_rows], method = "BH")
-
-    stored_models <- if (keepFits) {
-        stats::setNames(
-            lapply(fitted_rows, function(x) x$model),
-            gene_ids
-        )
-    } else {
-        list()
-    }
-
-    formula <- .gene_model_formula(
-        model_spec = variable_info$modelSpec,
-        specification = specification
-    )
-    info <- list(
-        backend = "glmmTMB",
-        model = "gene_model",
-        variable = model_state$variable,
-        variableType = model_state$variableType,
-        referenceLevel = model_state$referenceLevel,
-        contrastLevel = model_state$contrastLevel,
-        effectLabel = model_state$effectLabel,
-        testedTermInput = model_state$testedTermInput,
-        testedTerm = model_state$testedTerm,
-        testedVariable = model_state$testedVariable,
-        fixedEffectsFormula = model_state$fixedFormula,
-        specification = specification,
-        libraryOffset = model_state$libraryOffset,
-        genomeOffset = model_state$genomeOffset,
-        responseAssay = assay_name,
-        libSizeSource = model_state$libSizeSource,
-        genomeAssay = genome_assay,
-        offsetPseudocount = model_state$offsetPseudocount,
-        family = "nbinom2",
-        formula = paste(deparse(formula), collapse = " "),
-        n_features = nrow(results),
-        n_ok = sum(results$status == "ok"),
-        n_skipped = sum(results$status == "skipped"),
-        n_error = sum(results$status == "error")
-    )
-
-    MTTKFit(
-        results = results,
-        info = info,
-        models = stored_models
     )
 }

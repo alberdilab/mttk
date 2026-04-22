@@ -49,6 +49,33 @@ test_that("makeGeneModelData aligns gene/sample observations and offsets", {
     expect_equal(one_row$genome_abundance_offset, one_row$genome_abundance + 1)
 })
 
+test_that("gene-level workflows can include a repeated-measures sample block", {
+    x <- makeShowcaseMTTKExperiment()
+    model_data <- makeGeneModelData(
+        x,
+        variable = "condition",
+        sampleBlock = "station_id",
+        genomeOffset = FALSE
+    )
+
+    expect_true("sample_block" %in% names(model_data))
+    expect_identical(
+        S4Vectors::metadata(model_data)$mttk_gene_model$sampleBlock,
+        "station_id"
+    )
+
+    skip_if_not_installed("glmmTMB")
+    fit <- fitGeneModel(
+        x,
+        variable = "condition",
+        sampleBlock = "station_id",
+        genomeOffset = FALSE
+    )
+
+    expect_identical(fitInfo(fit)$sampleBlock, "station_id")
+    expect_identical(fitInfo(fit)$randomEffects, "sample_block_random_intercept")
+})
+
 test_that("gene-level workflows support formulas with explicit tested terms", {
     skip_if_not_installed("glmmTMB")
 

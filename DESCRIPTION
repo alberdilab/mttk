@@ -22,6 +22,7 @@ Depends:
     R (>= 4.3.0)
 Imports:
     ape,
+    BiocParallel,
     glmmTMB,
     methods,
     nlme,
@@ -51,7 +52,12 @@ Collate:
     'MTTKFit-meta-analysis.R'
     'MTTKFit-phylogeny.R'
     'MTTKExperiment-analysis.R'
-    'MTTKExperiment-modeling.R'
+    'MTTKExperiment-modeling-internals.R'
+    'MTTKExperiment-modeling-ko.R'
+    'MTTKExperiment-modeling-module.R'
+    'MTTKExperiment-modeling-pathway.R'
+    'MTTKExperiment-modeling-genome.R'
+    'MTTKExperiment-modeling-gene.R'
     'MTTKExample.R'
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3

@@ -123,6 +123,28 @@ The important distinction is between:
 
 Those answer different questions and should be chosen deliberately.
 
+## Repeated Measures Or Blocked Samples
+
+Most modeling workflows also support repeated measures or paired samples
+through a sample-level blocking column in `colData(x)`.
+
+In the showcase object, `station_id` links each control incubation to its
+matched oxygen-pulse incubation, so the same station can be modeled as a
+sample-level random intercept.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+fitKOMixedModel(
+    x,
+    variable = "condition",
+    sampleBlock = "station_id",
+    genomeOffset = FALSE
+)
+```
+
+Use that option when the question is still KO/gene/genome/module/pathway
+response, but the samples are not independent because they come from matched
+sites, subjects, vessels, or repeated sampling units.
+
 # Question 1: Which genes change?
 
 Suppose you want to identify genes whose RNA abundance shifts between control
@@ -221,6 +243,13 @@ fitTable(annotateKOFit(ko_fit, x), sortBy = "q_value")
 
 Here the mixed model uses `genome_id` as a random intercept, so the same KO can
 be modeled across multiple parent genomes.
+
+If closely related genomes are expected to share baseline KO activity, use a
+Brownian phylogenetic genome effect instead of independent genome intercepts.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+fitKOMixedModel(x, variable = "condition", genomeCorrelation = "brownian")
+```
 
 The same workflow can adjust for additional sample covariates while keeping one
 KO-level condition term as the target of inference.
@@ -423,6 +452,13 @@ For count reaggregation, MTTK supports:
 There is no count-side `split` mode, because these workflows fit count models,
 and splitting memberships would create fractional pseudo-counts instead of
 observed counts.
+
+If the genomes are phylogenetically structured, the same total-activity model
+can use Brownian covariance among genomes directly in the count fit.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+fitModuleMixedModel(x, variable = "condition", genomeCorrelation = "brownian")
+```
 
 # Question 7: Do modules or pathways respond differently across genomes?
 

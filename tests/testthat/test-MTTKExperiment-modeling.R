@@ -83,6 +83,26 @@ test_that("makeKOMixedModelData aligns KO/genome observations and offsets", {
     expect_equal(one_row$genome_abundance_offset, one_row$genome_abundance + 1)
 })
 
+test_that("KO mixed-model data can include a repeated-measures sample block", {
+    x <- makeShowcaseMTTKExperiment()
+    model_data <- makeKOMixedModelData(
+        x,
+        variable = "condition",
+        sampleBlock = "station_id",
+        genomeOffset = FALSE
+    )
+
+    expect_true("sample_block" %in% names(model_data))
+    expect_identical(
+        unique(as.character(model_data$sample_block)),
+        c("station_1", "station_2", "station_3")
+    )
+    expect_identical(
+        S4Vectors::metadata(model_data)$mttk_ko_model$sampleBlock,
+        "station_id"
+    )
+})
+
 test_that("KO mixed-model workflows support formulas with explicit tested terms", {
     skip_if_not_installed("glmmTMB")
 
@@ -341,6 +361,49 @@ test_that("fitKOMixedModel can include genome abundance offsets and keep models"
     )))
 })
 
+test_that("fitKOMixedModel can add a sample-block random intercept", {
+    skip_if_not_installed("glmmTMB")
+
+    x <- makeShowcaseMTTKExperiment()
+    fit <- fitKOMixedModel(
+        x,
+        variable = "condition",
+        sampleBlock = "station_id",
+        genomeOffset = FALSE
+    )
+
+    expect_s4_class(fit, "MTTKFit")
+    expect_identical(fitInfo(fit)$sampleBlock, "station_id")
+    expect_identical(
+        fitInfo(fit)$randomEffects,
+        "genome_random_intercept + sample_block_random_intercept"
+    )
+    expect_true(any(as.character(fit$status) == "ok"))
+})
+
+test_that("fitKOMixedModel can use Brownian phylogenetic genome correlation", {
+    skip_if_not_installed("glmmTMB")
+
+    x <- makeShowcaseMTTKExperiment()
+    fit <- fitKOMixedModel(
+        x,
+        variable = "condition",
+        genomeCorrelation = "brownian",
+        genomeOffset = FALSE
+    )
+
+    expect_s4_class(fit, "MTTKFit")
+    expect_identical(fitInfo(fit)$genomeCorrelation, "brownian")
+    expect_identical(fitInfo(fit)$treeSource, "genomeTree(x)")
+    expect_identical(fitInfo(fit)$treeTipCount, 4L)
+    expect_identical(
+        fitInfo(fit)$randomEffects,
+        "genome_phylogenetic_random_intercept"
+    )
+    expect_match(fitInfo(fit)$formula, "propto\\(0 \\+ genome_id \\|")
+    expect_true(any(as.character(fit$status) == "ok"))
+})
+
 test_that("fitKOMixedModel supports numeric sample-level variables", {
     skip_if_not_installed("glmmTMB")
 
@@ -449,6 +512,28 @@ test_that("KO group interaction models fit direct genome-group contrasts", {
     expect_true(all(as.character(fit$group_contrast_level) == "Archaea"))
 })
 
+test_that("KO group interaction models can use Brownian phylogenetic genome correlation", {
+    skip_if_not_installed("glmmTMB")
+
+    x <- makeShowcaseMTTKExperiment()
+    fit <- fitKOGroupInteractionModel(
+        x,
+        variable = "condition",
+        group = "domain",
+        genomeCorrelation = "brownian",
+        genomeOffset = FALSE
+    )
+
+    expect_s4_class(fit, "MTTKFit")
+    expect_identical(fitInfo(fit)$genomeCorrelation, "brownian")
+    expect_identical(
+        fitInfo(fit)$randomEffects,
+        "genome_phylogenetic_random_intercept"
+    )
+    expect_match(fitInfo(fit)$formula, "propto\\(0 \\+ genome_id \\|")
+    expect_true(any(as.character(fit$status) == "ok"))
+})
+
 test_that("KO group interaction models support covariate formulas", {
     skip_if_not_installed("glmmTMB")
 
@@ -518,6 +603,38 @@ test_that("fitModuleMixedModel fits one mixed model per module", {
     estimates <- stats::setNames(as.numeric(fit$estimate), rownames(fit))
     expect_gt(estimates[["M00001"]], 0)
     expect_lt(estimates[["M00010"]], 0)
+})
+
+test_that("module and pathway mixed models can use Brownian genome correlation", {
+    skip_if_not_installed("glmmTMB")
+
+    x <- makeShowcaseMTTKExperiment()
+
+    module_fit <- fitModuleMixedModel(
+        x,
+        variable = "condition",
+        genomeCorrelation = "brownian",
+        genomeOffset = FALSE
+    )
+    pathway_fit <- fitPathwayMixedModel(
+        x,
+        variable = "condition",
+        genomeCorrelation = "brownian",
+        genomeOffset = FALSE
+    )
+
+    expect_identical(fitInfo(module_fit)$genomeCorrelation, "brownian")
+    expect_identical(fitInfo(pathway_fit)$genomeCorrelation, "brownian")
+    expect_identical(
+        fitInfo(module_fit)$randomEffects,
+        "genome_phylogenetic_random_intercept"
+    )
+    expect_identical(
+        fitInfo(pathway_fit)$randomEffects,
+        "genome_phylogenetic_random_intercept"
+    )
+    expect_true(any(as.character(module_fit$status) == "ok"))
+    expect_true(any(as.character(pathway_fit$status) == "ok"))
 })
 
 test_that("fitModuleRandomSlopeModel stores module-by-genome conditional effects", {
@@ -681,6 +798,19 @@ test_that("fitKOMixedModel validates modeling inputs", {
         "Unknown sample-level variable"
     )
     expect_error(
+        fitKOMixedModel(x, variable = "condition", sampleBlock = "missing_block"),
+        "Unknown sample-level block variable"
+    )
+    expect_error(
+        fitKOMixedModel(
+            x,
+            formula = ~ condition + pH,
+            term = "condition",
+            sampleBlock = "condition"
+        ),
+        "must not also be included among the fixed-effect variables"
+    )
+    expect_error(
         fitKOMixedModel(
             x,
             variable = "condition",
@@ -688,6 +818,15 @@ test_that("fitKOMixedModel validates modeling inputs", {
             genomeAssay = "missing_assay"
         ),
         "Unknown genome assay name"
+    )
+    expect_error(
+        fitKOMixedModel(
+            x,
+            variable = "condition",
+            genomeCorrelation = "brownian",
+            phylogeny = ape::drop.tip(genomeTree(x), "genome_3")
+        ),
+        "missing genome tip"
     )
 
     SummarizedExperiment::colData(x)$phase <- factor(c("a", "b", "c", "d"))
@@ -719,5 +858,15 @@ test_that("fitKOMixedModel validates modeling inputs", {
     expect_error(
         fitPathwayRandomSlopeModel(x, variable = "missing_variable"),
         "Unknown sample-level variable"
+    )
+
+    genomeTree(x) <- NULL
+    expect_error(
+        fitKOMixedModel(
+            x,
+            variable = "condition",
+            genomeCorrelation = "brownian"
+        ),
+        "No genome phylogeny"
     )
 })

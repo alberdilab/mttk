@@ -22,7 +22,8 @@ The returned object contains:
 \item a genome-level \code{dna_genome_counts} assay stored in \code{genomeExperiment(x)},
 \item a rooted genome phylogeny stored in \code{genomeTree(x)},
 \item four genomes spanning two domains,
-\item sample metadata for a synthetic oxygen-pulse experiment,
+\item sample metadata for a synthetic oxygen-pulse experiment, including a
+repeated-measures \code{station_id} blocking variable,
 \item direct many-to-many links from KO to module and pathway.
 }
 }

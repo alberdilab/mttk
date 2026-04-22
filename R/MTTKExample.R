@@ -53,6 +53,7 @@
     col_data <- S4Vectors::DataFrame(
         sample_id = sample_ids,
         condition = c("control", "control", "treated", "treated"),
+        station_id = c("station_1", "station_2", "station_1", "station_2"),
         site = c("reef", "reef", "estuary", "estuary"),
         pH = c(8.1, 8.0, 7.4, 7.3)
     )
@@ -274,6 +275,7 @@ makeExampleMTTKExperiment <- function() {
             c("control", "control", "control", "oxygen_pulse", "oxygen_pulse", "oxygen_pulse"),
             levels = c("control", "oxygen_pulse")
         ),
+        station_id = c("station_1", "station_2", "station_3", "station_1", "station_2", "station_3"),
         salinity = c(32.1, 31.8, 32.4, 24.3, 23.9, 24.1),
         oxygen = c(7.8, 7.6, 7.9, 3.1, 2.9, 3.2),
         row.names = sample_ids
@@ -416,7 +418,8 @@ makeExampleMTTKExperiment <- function() {
 #' - a genome-level `dna_genome_counts` assay stored in `genomeExperiment(x)`,
 #' - a rooted genome phylogeny stored in `genomeTree(x)`,
 #' - four genomes spanning two domains,
-#' - sample metadata for a synthetic oxygen-pulse experiment,
+#' - sample metadata for a synthetic oxygen-pulse experiment, including a
+#'   repeated-measures `station_id` blocking variable,
 #' - direct many-to-many links from KO to module and pathway.
 #'
 #' @return A valid `MTTKExperiment`.
