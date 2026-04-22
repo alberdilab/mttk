@@ -3,6 +3,7 @@
 ^\.git$
 ^\.gitignore$
 ^\.DS_Store$
+^\.claude$
 ^\.\.Rcheck$
 ^MTTK\.Rcheck$
 ^\.rlib$

@@ -93,9 +93,9 @@ the reference levels of factor-like sample covariates before model fitting.}
 in the returned \code{MTTKFit}.}
 
 \item{BPPARAM}{A \code{BiocParallelParam} instance controlling how models are
-fitted in parallel. Defaults to \code{BiocParallel::SerialParam()} for
+fitted across KOs. Defaults to \code{BiocParallel::SerialParam()} for
 single-core execution. Pass e.g. \code{BiocParallel::MulticoreParam(4)} to fit
-models in parallel.}
+KO models in parallel.}
 }
 \value{
 An \code{MTTKFit} with one row per pathway.

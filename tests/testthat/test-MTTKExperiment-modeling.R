@@ -461,6 +461,30 @@ test_that("fitKORandomSlopeModel stores KO-by-genome conditional effects", {
     expect_true(all(unique(as.character(effects$ko_id)) %in% rownames(fit)))
 })
 
+test_that("KO random-slope models can use Brownian phylogenetic genome correlation", {
+    skip_if_not_installed("glmmTMB")
+
+    x <- makeShowcaseMTTKExperiment()
+    fit <- fitKORandomSlopeModel(
+        x,
+        variable = "condition",
+        genomeCorrelation = "brownian",
+        genomeOffset = FALSE,
+        keepFits = TRUE
+    )
+
+    expect_s4_class(fit, "MTTKFit")
+    expect_identical(fitInfo(fit)$genomeCorrelation, "brownian")
+    expect_identical(
+        fitInfo(fit)$randomEffects,
+        "genome_phylogenetic_random_intercept_and_slope"
+    )
+    expect_true(any(is.finite(as.numeric(fit$genome_intercept_slope_cor))))
+    effects <- koGenomeEffects(fit)
+    expect_true(all(c("ko_id", "genome_id", "conditional_effect_estimate") %in% names(effects)))
+    expect_true(any(as.character(fit$status) == "ok"))
+})
+
 test_that("random-slope KO models support formulas and explicit randomSlope selection", {
     skip_if_not_installed("glmmTMB")
 
@@ -667,6 +691,41 @@ test_that("fitModuleRandomSlopeModel stores module-by-genome conditional effects
     expect_true(all(unique(as.character(effects$module_id)) %in% rownames(fit)))
 })
 
+test_that("module and pathway random-slope models can use Brownian genome correlation", {
+    skip_if_not_installed("glmmTMB")
+
+    x <- makeShowcaseMTTKExperiment()
+    module_fit <- fitModuleRandomSlopeModel(
+        x,
+        variable = "condition",
+        membershipMode = "duplicate",
+        genomeCorrelation = "brownian",
+        genomeOffset = FALSE
+    )
+    pathway_fit <- fitPathwayRandomSlopeModel(
+        x,
+        variable = "condition",
+        membershipMode = "duplicate",
+        genomeCorrelation = "brownian",
+        genomeOffset = FALSE
+    )
+
+    expect_identical(
+        fitInfo(module_fit)$randomEffects,
+        "genome_phylogenetic_random_intercept_and_slope"
+    )
+    expect_identical(
+        fitInfo(pathway_fit)$randomEffects,
+        "genome_phylogenetic_random_intercept_and_slope"
+    )
+    expect_true(any(is.finite(as.numeric(module_fit$genome_intercept_slope_cor))))
+    expect_true(any(is.finite(as.numeric(pathway_fit$genome_intercept_slope_cor))))
+    expect_identical(fitInfo(module_fit)$genomeCorrelation, "brownian")
+    expect_identical(fitInfo(pathway_fit)$genomeCorrelation, "brownian")
+    expect_true(any(as.character(module_fit$status) == "ok"))
+    expect_true(any(as.character(pathway_fit$status) == "ok"))
+})
+
 test_that("module and pathway group interaction models fit direct genome-group contrasts", {
     skip_if_not_installed("glmmTMB")
 
@@ -832,7 +891,7 @@ test_that("fitKOMixedModel validates modeling inputs", {
     SummarizedExperiment::colData(x)$phase <- factor(c("a", "b", "c", "d"))
     expect_error(
         fitKOMixedModel(x, variable = "phase"),
-        "factor with exactly two levels"
+        "produces 3 contrasts"
     )
     expect_error(
         fitModuleMixedModel(
@@ -852,6 +911,15 @@ test_that("fitKOMixedModel validates modeling inputs", {
         "Unknown sample-level variable"
     )
     expect_error(
+        fitKORandomSlopeModel(
+            x,
+            variable = "condition",
+            genomeCorrelation = "brownian",
+            phylogeny = ape::drop.tip(genomeTree(x), "genome_3")
+        ),
+        "missing genome tip"
+    )
+    expect_error(
         fitModuleRandomSlopeModel(x, variable = "missing_variable"),
         "Unknown sample-level variable"
     )
@@ -863,6 +931,14 @@ test_that("fitKOMixedModel validates modeling inputs", {
     genomeTree(x) <- NULL
     expect_error(
         fitKOMixedModel(
+            x,
+            variable = "condition",
+            genomeCorrelation = "brownian"
+        ),
+        "No genome phylogeny"
+    )
+    expect_error(
+        fitKORandomSlopeModel(
             x,
             variable = "condition",
             genomeCorrelation = "brownian"

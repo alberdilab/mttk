@@ -93,6 +93,9 @@ different module/pathway workflows.
 - If the question is "does the same KO respond differently across genomes?",
   use `fitKORandomSlopeModel()` and then inspect the genome-specific KO effects
   with `koGenomeEffects()`.
+  If related genomes are expected to share both baseline activity and response
+  direction, set `genomeCorrelation = "brownian"` to use a joint Brownian
+  phylogenetic intercept-slope covariance model.
 - If the question is "does the KO response differ directly between two genome
   groups, such as Bacteria and Archaea?", use
   `fitKOGroupInteractionModel(..., group = "domain")`.
@@ -135,6 +138,9 @@ different module/pathway workflows.
   `fitPathwayRandomSlopeModel()` and then inspect the genome-specific
   conditional effects with `moduleGenomeEffects()` or
   `pathwayGenomeEffects()`.
+  These workflows also support `genomeCorrelation = "brownian"` when genome
+  responses should be correlated by the phylogeny rather than treated as
+  independent.
 - If the question is "which genomes respond?", use `fitGenomeModel()`.
 - If the question is "do closely related genomes tend to respond similarly?",
   fit genomes first and then use `fitGenomePhylogeneticSignal()`.

@@ -14,6 +14,8 @@ fitKORandomSlopeModel(
   genomeOffset = NULL,
   libSize = NULL,
   sampleBlock = NULL,
+  genomeCorrelation = c("independent", "brownian"),
+  phylogeny = NULL,
   genomeAssay = "dna_genome_counts",
   offsetPseudocount = 1,
   referenceLevels = NULL,
@@ -58,6 +60,14 @@ numeric vector with one value per sample.}
 \code{colData(x)}. When supplied, MTTK adds a random intercept
 \code{(1 | sample_block)} to account for repeated measures or paired samples.}
 
+\item{genomeCorrelation}{Genome-level correlation structure for the random
+intercept. Use \code{"independent"} for the standard genome random intercept, or
+\code{"brownian"} to model genome-level covariance from a phylogenetic tree via
+\code{glmmTMB::propto()}.}
+
+\item{phylogeny}{Optional \code{ape::phylo} object used when
+\code{genomeCorrelation = "brownian"}. If \code{NULL}, MTTK uses \code{genomeTree(x)}.}
+
 \item{genomeAssay}{Genome-level assay used when \code{genomeOffset = TRUE}.}
 
 \item{offsetPseudocount}{Non-negative pseudocount added to genome abundance
@@ -74,9 +84,9 @@ variable when it can be inferred unambiguously.}
 in the returned \code{MTTKFit}.}
 
 \item{BPPARAM}{A \code{BiocParallelParam} instance controlling how models are
-fitted in parallel. Defaults to \code{BiocParallel::SerialParam()} for
+fitted across KOs. Defaults to \code{BiocParallel::SerialParam()} for
 single-core execution. Pass e.g. \code{BiocParallel::MulticoreParam(4)} to fit
-models in parallel.}
+KO models in parallel.}
 }
 \value{
 An \code{MTTKFit} with one row per KO. The returned fit also stores
@@ -98,6 +108,10 @@ genome-specific KO responses appear similar or heterogeneous.
 \code{libraryOffset} controls whether the model includes
 \code{offset(log(lib_size))}. \code{genomeOffset} controls whether the model includes
 \code{offset(log(genome_abundance + offsetPseudocount))}.
+\code{genomeCorrelation = "independent"} uses the standard random intercept and
+random slope across genomes, while \code{genomeCorrelation = "brownian"} replaces
+both with a joint Brownian phylogenetic intercept-slope covariance structure
+derived from the genome tree.
 
 Genome-specific KO coefficients can be extracted with \code{\link[=koGenomeEffects]{koGenomeEffects()}}.
 }

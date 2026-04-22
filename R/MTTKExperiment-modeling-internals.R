@@ -323,6 +323,294 @@
     )
 }
 
+.encode_phylo_random_slope_values <- function(values, variable_name) {
+    if (is.character(values)) {
+        values <- factor(values, levels = unique(values))
+    } else if (is.logical(values)) {
+        values <- factor(as.character(values), levels = unique(as.character(values)))
+    }
+
+    if (is.factor(values)) {
+        values <- droplevels(values)
+        if (nlevels(values) != 2L) {
+            stop(
+                "Brownian phylogenetic random slopes currently require the random-slope variable '",
+                variable_name,
+                "' to be numeric or a factor with exactly two levels.",
+                call. = FALSE
+            )
+        }
+
+        return(as.numeric(values == levels(values)[2L]))
+    }
+
+    if (is.numeric(values) || is.integer(values)) {
+        values <- as.numeric(values)
+        if (anyNA(values)) {
+            stop(
+                "The random-slope variable '",
+                variable_name,
+                "' must not contain missing values.",
+                call. = FALSE
+            )
+        }
+
+        return(values)
+    }
+
+    stop(
+        "Brownian phylogenetic random slopes currently require the random-slope variable '",
+        variable_name,
+        "' to be numeric or factor-like.",
+        call. = FALSE
+    )
+}
+
+.prepare_feature_genome_random_slope_effect <- function(data, phylogeny_state, random_slope_variable) {
+    data <- as.data.frame(data, stringsAsFactors = FALSE)
+
+    if (!is.character(random_slope_variable) ||
+        length(random_slope_variable) != 1L ||
+        is.na(random_slope_variable) ||
+        random_slope_variable == "") {
+        stop(
+            "A valid random-slope variable is required for feature random-slope models.",
+            call. = FALSE
+        )
+    }
+
+    if (!(random_slope_variable %in% names(data))) {
+        stop(
+            "The random-slope variable '",
+            random_slope_variable,
+            "' is not available in the model data.",
+            call. = FALSE
+        )
+    }
+
+    if (identical(phylogeny_state$genomeCorrelation, "brownian")) {
+        feature_tree <- .prune_genome_tree(
+            phylogeny_state$tree,
+            unique(as.character(data$genome_id))
+        )
+        phylo_levels <- feature_tree$tip.label
+        phylo_vcov_base <- ape::vcv(feature_tree)
+
+        data$genome_id <- factor(as.character(data$genome_id), levels = phylo_levels)
+        data$phylo_intercept_id <- factor(as.character(data$genome_id), levels = phylo_levels)
+        data$phylo_slope_id <- factor(as.character(data$genome_id), levels = phylo_levels)
+        data$phylo_group <- factor("all_genomes", levels = "all_genomes")
+        data$phylo_random_slope_value <- .encode_phylo_random_slope_values(
+            values = data[[random_slope_variable]],
+            variable_name = random_slope_variable
+        )
+
+        intercept_names <- paste0("phylo_intercept_id", phylo_levels)
+        slope_names <- paste0("phylo_random_slope_value:phylo_slope_id", phylo_levels)
+        phylo_vcov <- phylo_vcov_base
+        dimnames(phylo_vcov) <- list(intercept_names, intercept_names)
+        phylo_slope_vcov <- phylo_vcov
+        dimnames(phylo_slope_vcov) <- list(slope_names, slope_names)
+
+        return(list(
+            data = data,
+            randomTerms = c(
+                "propto(0 + phylo_intercept_id | phylo_group, phylo_intercept_vcov)",
+                "propto(0 + phylo_random_slope_value:phylo_slope_id | phylo_group, phylo_slope_vcov)"
+            ),
+            formulaEnvironment = list(
+                phylo_intercept_vcov = phylo_vcov,
+                phylo_slope_vcov = phylo_slope_vcov
+            ),
+            effectExtraction = list(
+                mode = "brownian",
+                groupName = "phylo_group",
+                genomeIds = phylo_levels,
+                interceptPrefix = "phylo_intercept_id",
+                slopePrefix = "phylo_random_slope_value:phylo_slope_id",
+                interceptNames = intercept_names,
+                slopeNames = slope_names,
+                phyloVcovBase = phylo_vcov_base,
+                jointRandomTerm = paste(
+                    "propto(0 + phylo_intercept_id +",
+                    "phylo_random_slope_value:phylo_slope_id |",
+                    "phylo_group, phylo_joint_vcov)"
+                )
+            )
+        ))
+    }
+
+    data$genome_id <- factor(as.character(data$genome_id))
+    list(
+        data = data,
+        randomTerms = paste0("(1 + `", random_slope_variable, "` | genome_id)"),
+        formulaEnvironment = NULL,
+        effectExtraction = list(
+            mode = "independent",
+            groupName = "genome_id"
+        )
+    )
+}
+
+.make_feature_joint_phylo_vcov <- function(
+    base_vcov,
+    intercept_sd,
+    slope_sd,
+    intercept_names,
+    slope_names,
+    rho
+) {
+    if (!is.matrix(base_vcov) || nrow(base_vcov) != ncol(base_vcov)) {
+        stop("'base_vcov' must be a square matrix.", call. = FALSE)
+    }
+
+    if (!is.numeric(intercept_sd) || length(intercept_sd) != 1L || !is.finite(intercept_sd)) {
+        stop("'intercept_sd' must be a finite numeric scalar.", call. = FALSE)
+    }
+
+    if (!is.numeric(slope_sd) || length(slope_sd) != 1L || !is.finite(slope_sd)) {
+        stop("'slope_sd' must be a finite numeric scalar.", call. = FALSE)
+    }
+
+    if (!is.numeric(rho) || length(rho) != 1L || !is.finite(rho) || abs(rho) >= 1) {
+        stop("'rho' must be a finite scalar between -1 and 1.", call. = FALSE)
+    }
+
+    top_left <- (intercept_sd ^ 2) * base_vcov
+    bottom_right <- (slope_sd ^ 2) * base_vcov
+    off_diag <- (rho * intercept_sd * slope_sd) * base_vcov
+
+    joint_vcov <- rbind(
+        cbind(top_left, off_diag),
+        cbind(off_diag, bottom_right)
+    )
+    dimnames(joint_vcov) <- list(
+        c(intercept_names, slope_names),
+        c(intercept_names, slope_names)
+    )
+
+    joint_vcov
+}
+
+.fit_joint_phylo_random_slope <- function(
+    data,
+    model_spec,
+    specification,
+    sample_block,
+    base_vcov,
+    intercept_names,
+    slope_names,
+    intercept_sd,
+    slope_sd
+) {
+    intercept_sd <- max(as.numeric(intercept_sd), 1e-6)
+    slope_sd <- max(as.numeric(slope_sd), 1e-6)
+
+    joint_formula <- .feature_random_slope_formula(
+        model_spec = model_spec,
+        specification = specification,
+        genome_random_terms = paste(
+            "propto(0 + phylo_intercept_id +",
+            "phylo_random_slope_value:phylo_slope_id |",
+            "phylo_group, phylo_joint_vcov)"
+        ),
+        sample_block = sample_block
+    )
+
+    evaluated <- new.env(parent = emptyenv())
+
+    evaluate_rho <- function(rho) {
+        key <- sprintf("%.6f", rho)
+        if (exists(key, envir = evaluated, inherits = FALSE)) {
+            return(get(key, envir = evaluated, inherits = FALSE))
+        }
+
+        warning_messages <- character()
+        joint_vcov <- .make_feature_joint_phylo_vcov(
+            base_vcov = base_vcov,
+            intercept_sd = intercept_sd,
+            slope_sd = slope_sd,
+            intercept_names = intercept_names,
+            slope_names = slope_names,
+            rho = rho
+        )
+        fit <- tryCatch(
+            withCallingHandlers(
+                .fit_glmmtmb_nbinom2(
+                    formula = joint_formula,
+                    data = data,
+                    formula_environment = list(phylo_joint_vcov = joint_vcov)
+                ),
+                warning = function(w) {
+                    warning_messages <<- c(warning_messages, conditionMessage(w))
+                    invokeRestart("muffleWarning")
+                }
+            ),
+            error = identity
+        )
+
+        result <- if (inherits(fit, "error")) {
+            list(
+                rho = rho,
+                fit = NULL,
+                logLik = -Inf,
+                warning_messages = warning_messages,
+                error_message = conditionMessage(fit)
+            )
+        } else {
+            list(
+                rho = rho,
+                fit = fit,
+                logLik = as.numeric(stats::logLik(fit)),
+                warning_messages = warning_messages,
+                error_message = NULL
+            )
+        }
+
+        assign(key, result, envir = evaluated)
+        result
+    }
+
+    coarse_grid <- seq(-0.9, 0.9, by = 0.3)
+    coarse_results <- lapply(coarse_grid, evaluate_rho)
+    successful <- Filter(function(x) !is.null(x$fit) && is.finite(x$logLik), coarse_results)
+    if (length(successful) == 0L) {
+        return(NULL)
+    }
+
+    best <- successful[[which.max(vapply(successful, `[[`, numeric(1), "logLik"))]]
+    lower <- max(-0.95, best$rho - 0.2)
+    upper <- min(0.95, best$rho + 0.2)
+
+    if ((upper - lower) > 0.02) {
+        refinement <- tryCatch(
+            stats::optimize(
+                f = function(rho) {
+                    result <- evaluate_rho(rho)
+                    if (is.null(result$fit) || !is.finite(result$logLik)) {
+                        return(.Machine$double.xmax)
+                    }
+                    -result$logLik
+                },
+                interval = c(lower, upper)
+            ),
+            error = function(e) NULL
+        )
+
+        if (!is.null(refinement) && is.finite(refinement$objective)) {
+            refined <- evaluate_rho(refinement$minimum)
+            if (!is.null(refined$fit) && is.finite(refined$logLik) && refined$logLik > best$logLik) {
+                best <- refined
+            }
+        }
+    }
+
+    best$formula <- joint_formula
+    best$intercept_sd_base <- intercept_sd
+    best$slope_sd_base <- slope_sd
+    best
+}
+
 .set_formula_environment <- function(formula, values = NULL) {
     if (is.null(values) || length(values) == 0L) {
         return(formula)
@@ -1743,7 +2031,12 @@
     )
 }
 
-.feature_random_slope_formula <- function(model_spec, specification, sample_block = FALSE) {
+.feature_random_slope_formula <- function(
+    model_spec,
+    specification,
+    genome_random_terms = NULL,
+    sample_block = FALSE
+) {
     random_slope_variable <- model_spec$randomSlopeVariable
 
     if (is.na(random_slope_variable) || random_slope_variable == "") {
@@ -1753,7 +2046,11 @@
         )
     }
 
-    random_effects <- paste0("(1 + `", random_slope_variable, "` | genome_id)")
+    if (is.null(genome_random_terms)) {
+        random_effects <- paste0("(1 + `", random_slope_variable, "` | genome_id)")
+    } else {
+        random_effects <- as.character(genome_random_terms)
+    }
     if (isTRUE(sample_block)) {
         random_effects <- c(random_effects, "(1 | sample_block)")
     }
@@ -2087,6 +2384,248 @@
     out
 }
 
+.extract_glmmtmb_phylo_group_variance <- function(
+    fit,
+    group_name = "phylo_group",
+    intercept_names = NULL,
+    slope_names = NULL
+) {
+    vc_list <- tryCatch(
+        glmmTMB::VarCorr(fit)$cond,
+        error = function(e) NULL
+    )
+
+    if (is.null(vc_list) || length(vc_list) == 0L) {
+        return(list(
+            intercept_sd = NA_real_,
+            slope_sd = NA_real_,
+            intercept_slope_cor = 0
+        ))
+    }
+
+    group_matches <- which(startsWith(names(vc_list), group_name))
+    if (length(group_matches) == 0L) {
+        return(list(
+            intercept_sd = NA_real_,
+            slope_sd = NA_real_,
+            intercept_slope_cor = 0
+        ))
+    }
+
+    if (length(group_matches) == 1L) {
+        joint_vc <- vc_list[[group_matches[1L]]]
+        joint_stddev <- attr(joint_vc, "stddev")
+        joint_corr <- attr(joint_vc, "correlation")
+        joint_names <- names(joint_stddev)
+        if (is.null(joint_names) && !is.null(dimnames(joint_vc)[[1L]])) {
+            joint_names <- dimnames(joint_vc)[[1L]]
+            names(joint_stddev) <- joint_names
+        }
+
+        intercept_name <- if (!is.null(intercept_names)) {
+            matched <- intersect(intercept_names, joint_names)
+            if (length(matched) > 0L) matched[1L] else NA_character_
+        } else {
+            joint_names[1L]
+        }
+        slope_name <- if (!is.null(slope_names)) {
+            matched <- intersect(slope_names, joint_names)
+            if (length(matched) > 0L) matched[1L] else NA_character_
+        } else {
+            joint_names[length(joint_stddev)]
+        }
+
+        intercept_sd <- if (!is.na(intercept_name) && intercept_name %in% names(joint_stddev)) {
+            as.numeric(joint_stddev[[intercept_name]])
+        } else {
+            NA_real_
+        }
+        slope_sd <- if (!is.na(slope_name) && slope_name %in% names(joint_stddev)) {
+            as.numeric(joint_stddev[[slope_name]])
+        } else {
+            NA_real_
+        }
+        intercept_slope_cor <- if (!is.null(joint_corr) &&
+            !is.na(intercept_name) &&
+            !is.na(slope_name) &&
+            intercept_name %in% rownames(joint_corr) &&
+            slope_name %in% colnames(joint_corr)) {
+            as.numeric(joint_corr[intercept_name, slope_name])
+        } else {
+            NA_real_
+        }
+
+        return(list(
+            intercept_sd = intercept_sd,
+            slope_sd = slope_sd,
+            intercept_slope_cor = intercept_slope_cor
+        ))
+    }
+
+    intercept_sd <- NA_real_
+    slope_sd <- NA_real_
+
+    intercept_vc <- vc_list[[group_matches[1L]]]
+    intercept_stddev <- attr(intercept_vc, "stddev")
+    if (!is.null(intercept_stddev) && length(intercept_stddev) > 0L) {
+        intercept_sd <- as.numeric(intercept_stddev[[1L]])
+    }
+
+    if (length(group_matches) >= 2L) {
+        slope_vc <- vc_list[[group_matches[2L]]]
+        slope_stddev <- attr(slope_vc, "stddev")
+        if (!is.null(slope_stddev) && length(slope_stddev) > 0L) {
+            slope_sd <- as.numeric(slope_stddev[[1L]])
+        }
+    }
+
+    list(
+        intercept_sd = intercept_sd,
+        slope_sd = slope_sd,
+        intercept_slope_cor = 0
+    )
+}
+
+.extract_glmmtmb_phylo_group_effects <- function(
+    fit,
+    feature_id,
+    feature_id_column,
+    tested_term,
+    effect_label,
+    fixed_intercept,
+    fixed_effect,
+    group_ids,
+    group_name = "phylo_group",
+    intercept_prefix = "phylo_intercept_id",
+    slope_prefix = "phylo_random_slope_value:phylo_slope_id"
+) {
+    conditional_group <- tryCatch(
+        stats::coef(fit)$cond[[group_name]],
+        error = function(e) NULL
+    )
+
+    if (is.null(conditional_group)) {
+        return(S4Vectors::DataFrame())
+    }
+
+    conditional_group <- as.data.frame(conditional_group, stringsAsFactors = FALSE)
+    if (nrow(conditional_group) != 1L) {
+        return(S4Vectors::DataFrame())
+    }
+
+    ranef_group <- .extract_glmmtmb_group_condvar(fit, group_name = group_name)
+    fixed_vcov <- .extract_glmmtmb_fixed_effect_vcov(fit)
+
+    intercept_names <- paste0(intercept_prefix, group_ids)
+    slope_names <- paste0(slope_prefix, group_ids)
+
+    conditional_intercept_estimate <- vapply(
+        intercept_names,
+        function(name) {
+            if (name %in% names(conditional_group)) as.numeric(conditional_group[[name]][1L]) else NA_real_
+        },
+        numeric(1)
+    )
+    conditional_effect_estimate <- vapply(
+        slope_names,
+        function(name) {
+            if (name %in% names(conditional_group)) as.numeric(conditional_group[[name]][1L]) else NA_real_
+        },
+        numeric(1)
+    )
+
+    random_intercept_var <- rep(NA_real_, length(group_ids))
+    random_effect_var <- rep(NA_real_, length(group_ids))
+    if (!is.null(ranef_group) && !is.null(ranef_group$condVar)) {
+        cond_var_list <- ranef_group$condVar
+        if (is.list(cond_var_list) && length(cond_var_list) >= 1L && !is.null(cond_var_list[[1L]])) {
+            random_intercept_var <- vapply(
+                seq_len(length(group_ids)),
+                function(i) as.numeric(cond_var_list[[1L]][i, i, 1L]),
+                numeric(1)
+            )
+        }
+        if (is.list(cond_var_list) && length(cond_var_list) >= 2L && !is.null(cond_var_list[[2L]])) {
+            random_effect_var <- vapply(
+                seq_len(length(group_ids)),
+                function(i) as.numeric(cond_var_list[[2L]][i, i, 1L]),
+                numeric(1)
+            )
+        } else if (is.array(cond_var_list) && length(dim(cond_var_list)) == 3L) {
+            random_term_names <- colnames(ranef_group$effects)
+            intercept_indices <- match(intercept_names, random_term_names)
+            slope_indices <- match(slope_names, random_term_names)
+
+            if (all(!is.na(intercept_indices))) {
+                random_intercept_var <- vapply(
+                    intercept_indices,
+                    function(i) as.numeric(cond_var_list[i, i, 1L]),
+                    numeric(1)
+                )
+            }
+            if (all(!is.na(slope_indices))) {
+                random_effect_var <- vapply(
+                    slope_indices,
+                    function(i) as.numeric(cond_var_list[i, i, 1L]),
+                    numeric(1)
+                )
+            }
+        }
+    }
+
+    fixed_intercept_var <- NA_real_
+    fixed_effect_var <- NA_real_
+    if (!is.null(fixed_vcov)) {
+        fixed_term_names <- rownames(fixed_vcov)
+        fixed_intercept_name <- .match_model_term_name("(Intercept)", fixed_term_names)
+        fixed_effect_name <- .match_model_term_name(tested_term, fixed_term_names)
+
+        if (!is.na(fixed_intercept_name) && fixed_intercept_name %in% fixed_term_names) {
+            fixed_intercept_var <- as.numeric(
+                fixed_vcov[fixed_intercept_name, fixed_intercept_name]
+            )
+        }
+
+        if (!is.na(fixed_effect_name) && fixed_effect_name %in% fixed_term_names) {
+            fixed_effect_var <- as.numeric(
+                fixed_vcov[fixed_effect_name, fixed_effect_name]
+            )
+        }
+    }
+
+    random_intercept_std_error <- sqrt(pmax(random_intercept_var, 0))
+    random_effect_std_error <- sqrt(pmax(random_effect_var, 0))
+    conditional_intercept_std_error <- sqrt(
+        pmax(fixed_intercept_var + random_intercept_var, 0)
+    )
+    conditional_effect_std_error <- sqrt(
+        pmax(fixed_effect_var + random_effect_var, 0)
+    )
+
+    out <- S4Vectors::DataFrame(
+        tested_term = tested_term,
+        effect_label = effect_label,
+        conditional_intercept_estimate = conditional_intercept_estimate,
+        conditional_intercept_std_error = conditional_intercept_std_error,
+        conditional_effect_estimate = conditional_effect_estimate,
+        conditional_effect_std_error = conditional_effect_std_error,
+        random_intercept_std_error = random_intercept_std_error,
+        random_effect_std_error = random_effect_std_error,
+        random_intercept_deviation = conditional_intercept_estimate - fixed_intercept,
+        random_effect_deviation = conditional_effect_estimate - fixed_effect,
+        row.names = paste(feature_id, group_ids, sep = "::")
+    )
+    out[[feature_id_column]] <- feature_id
+    out[["genome_id"]] <- as.character(group_ids)
+    out <- out[, c(
+        feature_id_column,
+        "genome_id",
+        setdiff(names(out), c(feature_id_column, "genome_id"))
+    )]
+    rownames(out) <- paste(feature_id, group_ids, sep = "::")
+    out
+}
+
 .empty_feature_mixed_model_row <- function(feature_id, feature_summary, variable_info, feature_id_column) {
     columns <- list()
     columns[[feature_id_column]] <- feature_id
@@ -2296,6 +2835,7 @@
     feature_summary,
     model_spec,
     model,
+    phylogeny_state,
     keep_fits,
     feature_id_column,
     feature_label
@@ -2333,20 +2873,31 @@
         return(list(result = row, model = NULL, group_effects = S4Vectors::DataFrame()))
     }
 
-    data$genome_id <- factor(as.character(data$genome_id))
+    random_effect_state <- .prepare_feature_genome_random_slope_effect(
+        data = data,
+        phylogeny_state = phylogeny_state,
+        random_slope_variable = model_spec$randomSlopeVariable
+    )
+    data <- random_effect_state$data
+    has_sample_block <- "sample_block" %in% names(data)
 
     warning_messages <- character()
     formula <- .feature_random_slope_formula(
         model_spec = model_spec,
         specification = model,
-        sample_block = "sample_block" %in% names(data)
+        genome_random_terms = random_effect_state$randomTerms,
+        sample_block = has_sample_block
+    )
+    formula <- .set_formula_environment(
+        formula = formula,
+        values = random_effect_state$formulaEnvironment
     )
     fit <- tryCatch(
         withCallingHandlers(
-            glmmTMB::glmmTMB(
+            .fit_glmmtmb_nbinom2(
                 formula = formula,
                 data = data,
-                family = glmmTMB::nbinom2(link = "log")
+                formula_environment = random_effect_state$formulaEnvironment
             ),
             warning = function(w) {
                 warning_messages <<- c(warning_messages, conditionMessage(w))
@@ -2365,6 +2916,38 @@
             NA_character_
         }
         return(list(result = row, model = NULL, group_effects = S4Vectors::DataFrame()))
+    }
+
+    if (identical(random_effect_state$effectExtraction$mode, "brownian")) {
+        warm_start_variance <- .extract_glmmtmb_phylo_group_variance(
+            fit = fit,
+            group_name = random_effect_state$effectExtraction$groupName,
+            intercept_names = random_effect_state$effectExtraction$interceptNames,
+            slope_names = random_effect_state$effectExtraction$slopeNames
+        )
+        joint_fit <- .fit_joint_phylo_random_slope(
+            data = data,
+            model_spec = model_spec,
+            specification = model,
+            sample_block = has_sample_block,
+            base_vcov = random_effect_state$effectExtraction$phyloVcovBase,
+            intercept_names = random_effect_state$effectExtraction$interceptNames,
+            slope_names = random_effect_state$effectExtraction$slopeNames,
+            intercept_sd = warm_start_variance$intercept_sd,
+            slope_sd = warm_start_variance$slope_sd
+        )
+
+        if (!is.null(joint_fit) && !is.null(joint_fit$fit)) {
+            fit <- joint_fit$fit
+            formula <- joint_fit$formula
+            warning_messages <- unique(c(warning_messages, joint_fit$warning_messages))
+            random_effect_state$effectExtraction$mode <- "brownian_joint"
+        } else {
+            warning_messages <- unique(c(
+                warning_messages,
+                "Joint phylogenetic intercept-slope covariance profiling failed; using separate Brownian intercept and slope terms."
+            ))
+        }
     }
 
     coefficient_table <- summary(fit)$coefficients$cond
@@ -2393,21 +2976,63 @@
     tested_row <- coefficient_table[tested_term, , drop = FALSE]
     has_intercept <- "(Intercept)" %in% rownames(coefficient_table)
     intercept_row <- if (has_intercept) coefficient_table["(Intercept)", , drop = FALSE] else NULL
-    variance_summary <- .extract_glmmtmb_group_variance(
-        fit = fit,
-        group_name = "genome_id",
-        tested_term = tested_term
-    )
-    group_effects <- .extract_glmmtmb_group_effects(
-        fit = fit,
-        feature_id = feature_id,
-        feature_id_column = feature_id_column,
-        group_name = "genome_id",
-        tested_term = tested_term,
-        effect_label = .resolved_term_info(model_spec, tested_term)$effectLabel,
-        fixed_intercept = if (!is.null(intercept_row)) as.numeric(intercept_row[, "Estimate"]) else NA_real_,
-        fixed_effect = as.numeric(tested_row[, "Estimate"])
-    )
+    if (identical(random_effect_state$effectExtraction$mode, "brownian")) {
+        variance_summary <- .extract_glmmtmb_phylo_group_variance(
+            fit = fit,
+            group_name = random_effect_state$effectExtraction$groupName,
+            intercept_names = random_effect_state$effectExtraction$interceptNames,
+            slope_names = random_effect_state$effectExtraction$slopeNames
+        )
+        group_effects <- .extract_glmmtmb_phylo_group_effects(
+            fit = fit,
+            feature_id = feature_id,
+            feature_id_column = feature_id_column,
+            tested_term = tested_term,
+            effect_label = .resolved_term_info(model_spec, tested_term)$effectLabel,
+            fixed_intercept = if (!is.null(intercept_row)) as.numeric(intercept_row[, "Estimate"]) else NA_real_,
+            fixed_effect = as.numeric(tested_row[, "Estimate"]),
+            group_ids = random_effect_state$effectExtraction$genomeIds,
+            group_name = random_effect_state$effectExtraction$groupName,
+            intercept_prefix = random_effect_state$effectExtraction$interceptPrefix,
+            slope_prefix = random_effect_state$effectExtraction$slopePrefix
+        )
+    } else if (identical(random_effect_state$effectExtraction$mode, "brownian_joint")) {
+        variance_summary <- .extract_glmmtmb_phylo_group_variance(
+            fit = fit,
+            group_name = random_effect_state$effectExtraction$groupName,
+            intercept_names = random_effect_state$effectExtraction$interceptNames,
+            slope_names = random_effect_state$effectExtraction$slopeNames
+        )
+        group_effects <- .extract_glmmtmb_phylo_group_effects(
+            fit = fit,
+            feature_id = feature_id,
+            feature_id_column = feature_id_column,
+            tested_term = tested_term,
+            effect_label = .resolved_term_info(model_spec, tested_term)$effectLabel,
+            fixed_intercept = if (!is.null(intercept_row)) as.numeric(intercept_row[, "Estimate"]) else NA_real_,
+            fixed_effect = as.numeric(tested_row[, "Estimate"]),
+            group_ids = random_effect_state$effectExtraction$genomeIds,
+            group_name = random_effect_state$effectExtraction$groupName,
+            intercept_prefix = random_effect_state$effectExtraction$interceptPrefix,
+            slope_prefix = random_effect_state$effectExtraction$slopePrefix
+        )
+    } else {
+        variance_summary <- .extract_glmmtmb_group_variance(
+            fit = fit,
+            group_name = "genome_id",
+            tested_term = tested_term
+        )
+        group_effects <- .extract_glmmtmb_group_effects(
+            fit = fit,
+            feature_id = feature_id,
+            feature_id_column = feature_id_column,
+            group_name = "genome_id",
+            tested_term = tested_term,
+            effect_label = .resolved_term_info(model_spec, tested_term)$effectLabel,
+            fixed_intercept = if (!is.null(intercept_row)) as.numeric(intercept_row[, "Estimate"]) else NA_real_,
+            fixed_effect = as.numeric(tested_row[, "Estimate"])
+        )
+    }
     term_info <- .resolved_term_info(model_spec, tested_term = tested_term)
 
     row$tested_term <- tested_term
@@ -2459,6 +3084,8 @@
     membershipMode,
     libSize,
     sampleBlock = NULL,
+    genomeCorrelation = c("independent", "brownian"),
+    phylogeny = NULL,
     genomeAssay,
     offsetPseudocount,
     referenceLevels = NULL,
@@ -2483,6 +3110,8 @@
     if (!is.logical(keepFits) || length(keepFits) != 1L || is.na(keepFits)) {
         stop("'keepFits' must be TRUE or FALSE.", call. = FALSE)
     }
+
+    genome_correlation <- .normalize_genome_correlation(genomeCorrelation)
 
     model_spec <- .normalize_model_spec(
         x = x,
@@ -2519,6 +3148,12 @@
     assay_name <- model_state$sourceAssay
     genome_assay <- model_state$genomeAssay
     feature_ids <- rownames(feature_summary)
+    phylogeny_state <- .resolve_feature_phylogeny(
+        object = x,
+        genome_ids = observations$genome_id,
+        genomeCorrelation = genome_correlation,
+        phylogeny = phylogeny
+    )
 
     fitted_rows <- BiocParallel::bplapply(feature_ids, function(feature_id) {
         data_feature <- observations[
@@ -2532,6 +3167,7 @@
             feature_summary = feature_summary[feature_id, , drop = FALSE],
             model_spec = model_spec,
             model = specification,
+            phylogeny_state = phylogeny_state,
             keep_fits = keepFits,
             feature_id_column = feature_id_column,
             feature_label = model_state$featureLabel
@@ -2566,9 +3202,19 @@
     }
 
     has_sample_block <- !is.na(model_state$sampleBlock) && model_state$sampleBlock != ""
+    genome_random_terms <- if (identical(genome_correlation, "brownian")) {
+        paste(
+            "propto(0 + phylo_intercept_id +",
+            "phylo_random_slope_value:phylo_slope_id |",
+            "phylo_group, phylo_joint_vcov)"
+        )
+    } else {
+        NULL
+    }
     formula <- .feature_random_slope_formula(
         model_spec = model_spec,
         specification = specification,
+        genome_random_terms = genome_random_terms,
         sample_block = has_sample_block
     )
     info <- list(
@@ -2594,10 +3240,14 @@
         libSizeSource = model_state$libSizeSource,
         genomeAssay = genome_assay,
         offsetPseudocount = model_state$offsetPseudocount,
+        genomeCorrelation = genome_correlation,
+        treeSource = phylogeny_state$treeSource,
+        treeTipCount = phylogeny_state$treeTipCount,
         family = "nbinom2",
         formula = paste(deparse(formula), collapse = " "),
         randomEffects = .random_effect_description(
             genome_slope = TRUE,
+            genome_phylogenetic = identical(genome_correlation, "brownian"),
             sample_block = has_sample_block
         ),
         groupEffectColumn = "genome_id",

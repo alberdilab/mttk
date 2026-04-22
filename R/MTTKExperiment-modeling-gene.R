@@ -424,6 +424,8 @@ makeGeneModelData <- function(
 #'   the reference levels of factor-like sample covariates before model fitting.
 #' @param keepFits Logical; if `TRUE`, store the backend `glmmTMB` model objects
 #'   in the returned `MTTKFit`.
+#' @param BPPARAM A `BiocParallelParam` instance controlling feature-wise model
+#'   fitting.
 #'
 #' @return An `MTTKFit` with one row per gene.
 #'

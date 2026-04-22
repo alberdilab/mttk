@@ -284,6 +284,19 @@ That is the right follow-up when the question is something like:
 "does the same stress-response KO increase in bacteria but decrease in
 archaea?"
 
+If those genome-specific KO responses are expected to be phylogenetically
+structured, the same workflow can fit a joint Brownian intercept-slope
+covariance across the genome tree.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+fitKORandomSlopeModel(
+    x,
+    variable = "condition",
+    genomeCorrelation = "brownian",
+    genomeOffset = FALSE
+)
+```
+
 ## Directly testing KO differences between genome groups
 
 If the question is specifically whether the KO response differs between two
@@ -467,6 +480,19 @@ allow genome-specific responses.
 
 These are useful when the biological question is:
 "does the same pathway increase in some genomes but not in others?"
+
+When related genomes are expected to share both baseline activity and response
+direction, the same random-slope workflows can use Brownian phylogenetic
+intercept and slope terms.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+fitModuleRandomSlopeModel(
+    x,
+    variable = "condition",
+    genomeCorrelation = "brownian",
+    genomeOffset = FALSE
+)
+```
 
 ```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
 module_rs_fit <- fitModuleRandomSlopeModel(x, variable = "condition", genomeOffset = FALSE)

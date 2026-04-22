@@ -342,6 +342,10 @@ fitKOGroupInteractionModel <- function(
 #' `libraryOffset` controls whether the model includes
 #' `offset(log(lib_size))`. `genomeOffset` controls whether the model includes
 #' `offset(log(genome_abundance + offsetPseudocount))`.
+#' `genomeCorrelation = "independent"` uses the standard random intercept and
+#' random slope across genomes, while `genomeCorrelation = "brownian"` replaces
+#' both with a joint Brownian phylogenetic intercept-slope covariance structure
+#' derived from the genome tree.
 #'
 #' Genome-specific KO coefficients can be extracted with [koGenomeEffects()].
 #'
@@ -373,6 +377,8 @@ fitKORandomSlopeModel <- function(
     genomeOffset = NULL,
     libSize = NULL,
     sampleBlock = NULL,
+    genomeCorrelation = c("independent", "brownian"),
+    phylogeny = NULL,
     genomeAssay = "dna_genome_counts",
     offsetPseudocount = 1,
     referenceLevels = NULL,
@@ -391,6 +397,8 @@ fitKORandomSlopeModel <- function(
         membershipMode = "duplicate",
         libSize = libSize,
         sampleBlock = sampleBlock,
+        genomeCorrelation = genomeCorrelation,
+        phylogeny = phylogeny,
         genomeAssay = genomeAssay,
         offsetPseudocount = offsetPseudocount,
         referenceLevels = referenceLevels,

@@ -69,10 +69,8 @@ the reference levels of factor-like sample covariates before model fitting.}
 \item{keepFits}{Logical; if \code{TRUE}, store the backend \code{glmmTMB} model objects
 in the returned \code{MTTKFit}.}
 
-\item{BPPARAM}{A \code{BiocParallelParam} instance controlling how models are
-fitted in parallel. Defaults to \code{BiocParallel::SerialParam()} for
-single-core execution. Pass e.g. \code{BiocParallel::MulticoreParam(4)} to fit
-models in parallel.}
+\item{BPPARAM}{A \code{BiocParallelParam} instance controlling genome-wise model
+fitting.}
 }
 \value{
 An \code{MTTKFit} with one row per genome.

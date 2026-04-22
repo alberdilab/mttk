@@ -296,6 +296,11 @@ fitModuleGroupInteractionModel <- function(
 #' `membershipMode = "exclusive"` instead restricts the analysis to uniquely
 #' assigned memberships.
 #'
+#' `genomeCorrelation = "independent"` uses the standard random intercept and
+#' random slope across genomes, while `genomeCorrelation = "brownian"` replaces
+#' both with a joint Brownian phylogenetic intercept-slope covariance structure
+#' derived from the genome tree.
+#'
 #' Genome-specific conditional module effects can be extracted with
 #' [moduleGenomeEffects()].
 #'
@@ -329,6 +334,8 @@ fitModuleRandomSlopeModel <- function(
     membershipMode = c("duplicate", "exclusive"),
     libSize = NULL,
     sampleBlock = NULL,
+    genomeCorrelation = c("independent", "brownian"),
+    phylogeny = NULL,
     genomeAssay = "dna_genome_counts",
     offsetPseudocount = 1,
     referenceLevels = NULL,
@@ -348,6 +355,8 @@ fitModuleRandomSlopeModel <- function(
         membershipMode = membershipMode,
         libSize = libSize,
         sampleBlock = sampleBlock,
+        genomeCorrelation = genomeCorrelation,
+        phylogeny = phylogeny,
         genomeAssay = genomeAssay,
         offsetPseudocount = offsetPseudocount,
         referenceLevels = referenceLevels,

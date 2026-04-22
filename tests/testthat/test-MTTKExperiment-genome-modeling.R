@@ -221,6 +221,6 @@ test_that("fitGenomeModel validates modeling inputs", {
     SummarizedExperiment::colData(x)$phase <- factor(c("a", "b", "c", "d"))
     expect_error(
         fitGenomeModel(x, variable = "phase"),
-        "factor with exactly two levels"
+        "produces 3 contrasts"
     )
 })

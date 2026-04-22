@@ -450,6 +450,8 @@ makeGenomeModelData <- function(
 #' @inheritParams makeGenomeModelData
 #' @param keepFits Logical; if `TRUE`, store the backend `glmmTMB` model objects
 #'   in the returned `MTTKFit`.
+#' @param BPPARAM A `BiocParallelParam` instance controlling genome-wise model
+#'   fitting.
 #'
 #' @return An `MTTKFit` with one row per genome.
 #'
