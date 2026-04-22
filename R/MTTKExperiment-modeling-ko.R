@@ -47,14 +47,16 @@ aggregateToKOGenome <- function(x, assay = "rna_gene_counts") {
 #' @param x An `MTTKExperiment`.
 #' @param variable A single sample-level column name from `colData(x)` for the
 #'   simple one-variable interface. The column must be numeric or a factor with
-#'   exactly two levels. Supply exactly one of `variable` or `formula`.
+#'   at least two levels. For factors with three or more levels supply `term` to
+#'   select which contrast to test. Supply exactly one of `variable` or `formula`.
 #' @param formula Optional one-sided or two-sided fixed-effect formula for the
 #'   sample-level covariates, for example `~ condition + pH` or
 #'   `rna_count ~ condition + pH`. Offsets and genome-level random effects are
 #'   added internally by MTTK. Supply exactly one of `variable` or `formula`.
-#' @param term Optional fixed-effect term to extract from a formula-based fit.
-#'   This is required when the fixed-effect formula defines more than one tested
-#'   term.
+#' @param term Optional character string naming the model term to test. Required
+#'   when `variable` refers to a factor with three or more levels (supply the
+#'   contrast name, e.g. `"conditionB"`) or when `formula` defines more than one
+#'   tested term.
 #' @param assay Gene-level assay name used as the RNA response.
 #' @param libraryOffset Logical; if `TRUE`, include `offset(log(lib_size))`.
 #' @param libSize Library-size offset specification. Use `NULL` to compute
@@ -152,15 +154,17 @@ makeKOMixedModelData <- function(
 #' @param x An `MTTKExperiment`.
 #' @param variable A single sample-level column name from `colData(x)` for the
 #'   simple one-variable interface. The column must be numeric or a factor with
-#'   exactly two levels. Supply exactly one of `variable` or `formula`.
+#'   at least two levels. For factors with three or more levels supply `term` to
+#'   select which contrast to test. Supply exactly one of `variable` or `formula`.
 #' @param formula Optional one-sided or two-sided fixed-effect formula for the
 #'   sample-level covariates, for example `~ condition + salinity` or
 #'   `rna_count ~ condition + salinity`. Offsets and genome-level random
 #'   effects are added internally by MTTK. Supply exactly one of `variable` or
 #'   `formula`.
-#' @param term Optional fixed-effect term to extract from a formula-based fit.
-#'   This is required when the fixed-effect formula defines more than one tested
-#'   term.
+#' @param term Optional character string naming the model term to test. Required
+#'   when `variable` refers to a factor with three or more levels (supply the
+#'   contrast name, e.g. `"conditionB"`) or when `formula` defines more than one
+#'   tested term.
 #' @param assay Gene-level assay name used as the RNA response.
 #' @param libraryOffset Logical; if `TRUE`, include `offset(log(lib_size))`.
 #' @param libSize Library-size offset specification. Use `NULL` to compute

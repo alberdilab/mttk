@@ -31,7 +31,8 @@ fitModuleGroupInteractionModel(
 
 \item{variable}{A single sample-level column name from \code{colData(x)} for the
 simple one-variable interface. The column must be numeric or a factor with
-exactly two levels. Supply exactly one of \code{variable} or \code{formula}.}
+at least two levels. For factors with three or more levels supply \code{term} to
+select which contrast to test. Supply exactly one of \code{variable} or \code{formula}.}
 
 \item{formula}{Optional one-sided or two-sided fixed-effect formula for the
 sample-level covariates, for example \code{~ condition + salinity} or
@@ -39,9 +40,10 @@ sample-level covariates, for example \code{~ condition + salinity} or
 effects are added internally by MTTK. Supply exactly one of \code{variable} or
 \code{formula}.}
 
-\item{term}{Optional fixed-effect term to extract from a formula-based fit.
-This is required when the fixed-effect formula defines more than one tested
-term.}
+\item{term}{Optional character string naming the model term to test. Required
+when \code{variable} refers to a factor with three or more levels (supply the
+contrast name, e.g. \code{"conditionB"}) or when \code{formula} defines more than one
+tested term.}
 
 \item{group}{A single column name from \code{genomeData(x)} defining the genome
 groups to compare.}

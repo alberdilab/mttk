@@ -17,24 +17,26 @@
 
     if (is.factor(values)) {
         values <- droplevels(values)
+        n <- nlevels(values)
 
-        if (nlevels(values) != 2L) {
+        if (n < 2L) {
             stop(
-                "'variable' must refer to a numeric column or a factor with exactly two levels.",
+                "'variable' must refer to a factor with at least two levels.",
                 call. = FALSE
             )
         }
 
         reference_level <- levels(values)[1L]
-        contrast_level <- levels(values)[2L]
-        effect_label <- paste0(
-            variable,
-            ": ",
-            contrast_level,
-            " vs ",
-            reference_level
-        )
-        variable_type <- "two_level_factor"
+
+        if (n == 2L) {
+            contrast_level <- levels(values)[2L]
+            effect_label <- paste0(variable, ": ", contrast_level, " vs ", reference_level)
+            variable_type <- "two_level_factor"
+        } else {
+            contrast_level <- NA_character_
+            effect_label <- paste0(variable, ": contrasts vs ", reference_level)
+            variable_type <- "multi_level_factor"
+        }
     } else if (is.numeric(values) || is.integer(values)) {
         values <- as.numeric(values)
 
@@ -193,14 +195,6 @@
             )
         }
 
-        if (isTRUE(require_binary_factor) && nlevels(values) != 2L) {
-            stop(
-                "Modeling variable '",
-                column_name,
-                "' must be numeric or a factor with exactly two levels in the simple variable interface.",
-                call. = FALSE
-            )
-        }
     } else if (length(unique(values)) < 2L) {
         stop(
             "Modeling variable '",
@@ -556,6 +550,27 @@
                 )
             ))
         }
+
+        if (is.factor(values) && nlevels(values) >= 3L) {
+            ref <- levels(values)[1L]
+            stripped_term <- gsub("`", "", as.character(tested_term), fixed = TRUE)
+            stripped_var  <- gsub("`", "", tested_variable, fixed = TRUE)
+            contrast_level <- if (
+                startsWith(stripped_term, stripped_var) &&
+                nchar(stripped_term) > nchar(stripped_var)
+            ) {
+                substring(stripped_term, nchar(stripped_var) + 1L)
+            } else {
+                stripped_term
+            }
+            return(list(
+                variable = tested_variable,
+                type = "multi_level_factor",
+                referenceLevel = ref,
+                contrastLevel = contrast_level,
+                effectLabel = paste0(tested_variable, ": ", contrast_level, " vs ", ref)
+            ))
+        }
     }
 
     list(
@@ -629,17 +644,29 @@
         sample_data <- .model_sample_frame(
             x = x,
             variables = variable,
-            referenceLevels = referenceLevels,
-            require_binary_variables = variable
+            referenceLevels = referenceLevels
         )
         fixed_formula <- stats::as.formula(paste0("~ `", variable, "`"))
         candidate_terms <- .available_model_terms(fixed_formula, sample_data)
-        tested_term <- .resolve_requested_model_term(
-            term = if (is.null(term)) variable else term,
-            candidates = candidate_terms,
-            strict = TRUE,
-            term_label = "term"
-        )
+        if (is.null(term)) {
+            if (length(candidate_terms) == 1L) {
+                tested_term <- candidate_terms[[1L]]
+            } else {
+                stop(
+                    "Variable '", variable, "' produces ", length(candidate_terms),
+                    " contrasts (", paste(candidate_terms, collapse = ", "), "). ",
+                    "Supply 'term' to select which contrast to test.",
+                    call. = FALSE
+                )
+            }
+        } else {
+            tested_term <- .resolve_requested_model_term(
+                term = term,
+                candidates = candidate_terms,
+                strict = TRUE,
+                term_label = "term"
+            )
+        }
         term_info <- .describe_tested_term(
             sample_data = sample_data,
             tested_term = tested_term,
