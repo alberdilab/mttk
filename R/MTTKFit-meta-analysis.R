@@ -1192,7 +1192,7 @@ fitGenomeGroupMetaAnalysis <- function(
 #' random-effects inverse-variance meta-analysis with a DerSimonian-Laird
 #' `tau^2` estimate is used.
 #'
-#' The per-genome standard errors are approximate. MTTK derives them from the
+#' The per-genome standard errors are approximate. mttk derives them from the
 #' fixed-effect variance and the conditional random-slope variance, without
 #' modeling the full cross-covariance between those components. As a result,
 #' this workflow should be interpreted as an approximate synthesis layer for
@@ -1625,7 +1625,7 @@ fitKOGenomeGroupMetaAnalysis <- function(
 #' @param x An `MTTKFit` returned by [fitKOGenomeGroupMetaAnalysis()].
 #' @param reference Optional single reference group identifier. When `NULL` and
 #'   `contrast = NULL`, all pairwise group comparisons are returned. When
-#'   `reference` is supplied and `contrast = NULL`, MTTK compares that
+#'   `reference` is supplied and `contrast = NULL`, mttk compares that
 #'   reference group against every other available group.
 #' @param contrast Optional single contrast group identifier. When supplied, a
 #'   single directed contrast `contrast - reference` is returned.

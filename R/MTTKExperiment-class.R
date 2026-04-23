@@ -39,8 +39,8 @@
 #' - `rowTree` and `rowLinks` can store optional named hierarchies when a
 #'   relationship is naturally tree-structured.
 #'
-#' @section MTTK metadata contract:
-#' MTTK-specific components are kept close to existing Bioconductor
+#' @section mttk metadata contract:
+#' mttk-specific components are kept close to existing Bioconductor
 #' infrastructure:
 #'
 #' - `rownames(x)`, `colnames(x)`, and `rownames(genomeExperiment(x))` are the

@@ -915,7 +915,7 @@
         name,
         links = .normalize_links(value),
         activeHierarchies = .normalize_active_hierarchies(value),
-        stop("Unknown MTTK component: ", name, call. = FALSE)
+        stop("Unknown mttk component: ", name, call. = FALSE)
     )
 
     x <- .set_mttk_state(x, state)

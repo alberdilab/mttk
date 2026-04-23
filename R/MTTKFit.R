@@ -1,6 +1,6 @@
 #' Construct an `MTTKFit`
 #'
-#' `MTTKFit()` builds a compact result container for MTTK modeling workflows.
+#' `MTTKFit()` builds a compact result container for mttk modeling workflows.
 #' The object behaves like an `S4Vectors::DataFrame`, with one row per modeled
 #' feature and columns for coefficient summaries, fit diagnostics, and feature
 #' metadata.
@@ -599,7 +599,7 @@ methods::setMethod("modelObjects", "MTTKFit", function(x) {
 #' combination and contains the conditional KO effect estimated for that genome.
 #'
 #' This workflow is intended as the first bridge between KO-level and
-#' genome-level analyses in MTTK. The returned table can be used to ask whether
+#' genome-level analyses in mttk. The returned table can be used to ask whether
 #' the same KO responds similarly or differently across genomes, and can later
 #' be joined to `genomeData(x)` for taxonomy-aware summaries.
 #'
@@ -1008,7 +1008,7 @@ significantResults <- function(
 #' `annotateKOFit()` appends KO-centered annotation columns from an
 #' `MTTKExperiment` onto an `MTTKFit`. This is intended for fits whose rows
 #' represent KO identifiers, such as the first KO-level mixed-model workflow in
-#' MTTK.
+#' mttk.
 #'
 #' By default the function follows two direct KO-centered mappings,
 #' `ko_to_module` and `ko_to_pathway`, and adds `module_id` and `pathway_id`
@@ -1113,7 +1113,7 @@ annotateKOFit <- function(
 #'
 #' `fetchKEGGModuleTable()` retrieves KEGG module metadata directly from the
 #' KEGG MODULE database through `KEGGREST` and returns it in the standardized
-#' format used by MTTK.
+#' format used by mttk.
 #'
 #' The resulting table contains `module_id`, `module_name`, `module_class`, and
 #' `module_definition` columns and can be supplied directly to
@@ -1231,7 +1231,7 @@ fetchKEGGModuleTable <- function(moduleIds = NULL, batchSize = 10L, sleep = 0) {
 #' Read a KEGG Module Annotation Table
 #'
 #' `readKEGGModuleTable()` imports a tab-separated KEGG module table and
-#' standardizes the main columns used by MTTK. The returned table uses
+#' standardizes the main columns used by mttk. The returned table uses
 #' `module_id`, `module_name`, `module_class`, and `module_definition` column
 #' names when those fields are available.
 #'

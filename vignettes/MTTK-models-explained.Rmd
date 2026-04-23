@@ -1,30 +1,30 @@
 ---
-title: "How MTTK Models Work"
-author: "MTTK authors"
-package: MTTK
+title: "How mttk Models Work"
+author: "mttk authors"
+package: mttk
 output:
     rmarkdown::html_vignette:
         toc: true
 vignette: >
-    %\VignetteIndexEntry{How MTTK Models Work}
+    %\VignetteIndexEntry{How mttk Models Work}
     %\VignetteEngine{knitr::rmarkdown}
     %\VignetteEncoding{UTF-8}
 ---
 
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
-library(MTTK)
+library(mttk)
 ```
 
 # Overview
 
-This vignette explains the mathematics behind the main MTTK workflows in
+This vignette explains the mathematics behind the main mttk workflows in
 non-technical language.
 
 The goal is not to turn every user into a statistician. The goal is to make it
 clear:
 
-- why MTTK uses count models rather than simple linear models,
+- why mttk uses count models rather than simple linear models,
 - why genomes often appear as random effects,
 - what the offsets are doing,
 - how KO/module/pathway analyses differ from each other,
@@ -36,7 +36,7 @@ can appear in multiple genomes.
 
 # Why not use a simple linear model?
 
-The assays modeled by MTTK are counts. Counts have two features that matter:
+The assays modeled by mttk are counts. Counts have two features that matter:
 
 1. they are non-negative,
 2. their variance usually grows with the mean.
@@ -47,7 +47,7 @@ linear model does not describe that well.
 
 ## Why negative binomial?
 
-MTTK mainly uses a negative-binomial model for counts:
+mttk mainly uses a negative-binomial model for counts:
 
 $$
 Y \sim \text{NB}(\mu, \phi)
@@ -74,12 +74,12 @@ In plain language:
 - Negative binomial says "the variance can be larger, and we estimate how much
   larger".
 
-That is why MTTK uses negative-binomial models as its main count-modeling
+That is why mttk uses negative-binomial models as its main count-modeling
 workhorse.
 
 ## Why use a log link?
 
-MTTK models expected counts on the log scale:
+mttk models expected counts on the log scale:
 
 $$
 \log(\mu) = \eta
@@ -105,7 +105,7 @@ estimate.
 
 ## Library-size offset
 
-When MTTK includes library normalization, the model contains:
+When mttk includes library normalization, the model contains:
 
 $$
 \log(\mu) = \ldots + \log(\text{lib\_size})
@@ -123,7 +123,7 @@ samples simply have more total sequencing depth than others.
 ## Genome-abundance offset
 
 In genome-resolved metatranscriptomics, gene RNA can be influenced by how
-abundant the parent genome is in the sample. MTTK can therefore also include:
+abundant the parent genome is in the sample. mttk can therefore also include:
 
 $$
 \log(\mu) = \ldots + \log(\text{genome\_abundance} + c)
@@ -146,7 +146,7 @@ abundance.
 
 # Why mixed models?
 
-Many MTTK workflows use mixed models rather than ordinary generalized linear
+Many mttk workflows use mixed models rather than ordinary generalized linear
 models.
 
 The reason is nesting. If the same KO is observed in multiple genomes, those
@@ -184,7 +184,7 @@ $$
 That says genomes can differ, but those differences are centered around zero
 and have an estimated amount of spread.
 
-# The main MTTK model families
+# The main mttk model families
 
 Rather than explain every function name separately, it is easier to explain the
 core model families and then map functions onto them.
@@ -279,7 +279,7 @@ Used by:
 ### Core model
 
 Let $Y_{kij}$ be the RNA count assigned to KO $k$, genome $i$, sample $j$.
-Then MTTK fits:
+Then mttk fits:
 
 $$
 Y_{kij} \sim \text{NB}(\mu_{kij}, \phi_k)
@@ -530,11 +530,11 @@ Two genomes that are closely related are often more similar than two distant
 genomes. If that similarity matters biologically, treating genomes as fully
 independent can be too naive.
 
-MTTK currently uses phylogeny in two main ways.
+mttk currently uses phylogeny in two main ways.
 
 ## 1. Phylogenetic covariance in count models
 
-For some KO/module/pathway mixed models, MTTK can replace independent genome
+For some KO/module/pathway mixed models, mttk can replace independent genome
 effects with Brownian phylogenetic covariance.
 
 In a Brownian model, the covariance between genome effects reflects shared
@@ -549,7 +549,7 @@ where:
 - $\mathbf{b}$ is the vector of genome effects,
 - $\mathbf{V}$ is the phylogenetic covariance matrix derived from the tree.
 
-For random-slope models, MTTK extends this to a joint intercept-slope
+For random-slope models, mttk extends this to a joint intercept-slope
 covariance structure so that both baseline activity and response strength can
 co-vary along the phylogeny.
 
@@ -591,7 +591,7 @@ The intuition is:
 - estimate an average response,
 - but do so while accounting for phylogenetic covariance among genomes.
 
-# Why does MTTK need so many related functions?
+# Why does mttk need so many related functions?
 
 Many of the function names look similar because they answer nearby, but not
 identical, questions.
@@ -605,7 +605,7 @@ For example:
   coherently.
 - `fitModuleMixedModel()` asks whether total module activity changes.
 
-That is why MTTK emphasizes question-first analysis rather than one default
+That is why mttk emphasizes question-first analysis rather than one default
 workflow for every dataset.
 
 # A short decision guide
@@ -625,7 +625,7 @@ If you only remember a few rules, these are the most important ones:
 
 # Summary
 
-The main mathematical ideas in MTTK are:
+The main mathematical ideas in mttk are:
 
 - negative-binomial models for overdispersed counts,
 - log offsets for sequencing depth and optional genome abundance,
@@ -634,7 +634,7 @@ The main mathematical ideas in MTTK are:
 - and phylogenetic covariance or tree-based follow-up when related genomes are
   expected to behave similarly.
 
-You do not need to remember every equation to use MTTK. But it helps to know
+You do not need to remember every equation to use mttk. But it helps to know
 what each family of models is trying to separate:
 
 - average effects,

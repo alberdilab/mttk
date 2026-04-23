@@ -437,7 +437,7 @@ makeShowcaseMTTKExperiment <- function() {
 #' Showcase `MTTKExperiment`
 #'
 #' `MTTKShowcase` is a packaged `MTTKExperiment` intended for vignette-style
-#' walkthroughs of the main MTTK workflows.
+#' walkthroughs of the main mttk workflows.
 #'
 #' The object contains one gene-level assay (`rna_gene_counts`), two
 #' genome-level assays (`rna_genome_counts` and `dna_genome_counts`), a rooted

@@ -1,10 +1,10 @@
-# MTTK
+# mttk
 
 Metatranscriptomics toolkit for nested gene, genome, and community analysis.
 
-## What MTTK is for
+## What mttk is for
 
-MTTK is designed for genome-resolved metatranscriptomics, where the data are
+mttk is designed for genome-resolved metatranscriptomics, where the data are
 not only a gene-by-sample count matrix.
 
 - genes are nested within genomes,
@@ -20,16 +20,16 @@ The package therefore focuses on:
 - transparent link tables between genes, genomes, and annotations,
 - aggregation and modeling workflows that can use those nested relationships.
 
-## How MTTK Differs From edgeR, DESeq2, and limma-voom
+## How mttk Differs From edgeR, DESeq2, and limma-voom
 
 `edgeR`, `DESeq2`, and `limma-voom` are established tools for differential
 expression on feature-by-sample expression matrices. They are strong choices
 when the main task is gene-wise or transcript-wise differential expression in a
 mostly flat design.
 
-MTTK is different in two main ways.
+mttk is different in two main ways.
 
-First, MTTK is built around a different data structure. It keeps:
+First, mttk is built around a different data structure. It keeps:
 
 - gene-level RNA data,
 - genome-level data such as DNA abundance,
@@ -39,7 +39,7 @@ First, MTTK is built around a different data structure. It keeps:
 
 in one Bioconductor-friendly object.
 
-Second, MTTK is aiming at questions that are awkward to express in a flat
+Second, mttk is aiming at questions that are awkward to express in a flat
 RNA-seq workflow, for example:
 
 - comparing activity while accounting for the parent genome of each gene,
@@ -55,22 +55,22 @@ The difference is also in the modeling target, not just in the container.
   feature-by-sample design, with shrinkage for dispersion and fold changes.
 - `limma-voom` transforms counts to log-expression with precision weights, then
   fits weighted linear models per feature.
-- MTTK's current function-level workflows start from a KO-level
+- mttk's current function-level workflows start from a KO-level
   `glmmTMB` negative-binomial mixed model, then either:
   - summarize KO effect sizes upward to modules or pathways with a
     meta-analysis-like synthesis, or
   - re-aggregate counts and refit a mixed model at module or pathway level
     when the target is total functional activity.
 
-So the current MTTK workflow answers a different question:
+So the current mttk workflow answers a different question:
 
 - standard RNA-seq workflows mostly ask whether each feature changes across
   samples,
-- the current MTTK workflows can ask either whether KO-level effects assigned
+- the current mttk workflows can ask either whether KO-level effects assigned
   to a module or pathway are coherent, or whether total module/pathway activity
   shifts across samples.
 
-Most modeling functions in MTTK support two user-facing interfaces:
+Most modeling functions in mttk support two user-facing interfaces:
 
 - `variable = "condition"` for the simple one-variable case
 - `formula = ~ condition + pH` plus `term = "condition"` when you want to
@@ -82,8 +82,79 @@ with `sampleBlock = "station_id"` or another blocking column from
 
 ## Choosing An Analysis
 
-The higher-level question matters, because MTTK currently supports two
+The higher-level question matters, because mttk currently supports two
 different module/pathway workflows.
+
+### Static Decision Tree
+
+Use this quick tree when you want to move from a biological question to the
+most relevant mttk function.
+
+1. What is your primary unit of interest?
+- Gene: use `fitGeneModel()`.
+- Genome: go to step 2.
+- KO: go to step 3.
+- Module or pathway: go to step 4.
+
+2. If the unit is a genome:
+- Overall response to a condition or continuous variable: `fitGenomeModel()`.
+- Coherence within a genome group such as domain or clade:
+  `fitGenomeModel()` then `fitGenomeGroupMetaAnalysis()`.
+- Global phylogenetic signal: `fitGenomeModel()` then
+  `fitGenomePhylogeneticSignal()`.
+- Responding subtree: `fitGenomeModel()` then `scanGenomeClades()`.
+- Phylogenetically corrected mean response: `fitGenomeModel()` then
+  `fitGenomePhylogeneticGLS()`.
+
+3. If the unit is a KO:
+- Shared KO response across genomes: `fitKOMixedModel()`.
+- KO response differs among genomes: `fitKORandomSlopeModel()`.
+- Direct KO contrast between two genome groups: `fitKOGroupInteractionModel()`.
+- Coherence of KO responses within a genome group:
+  `fitKORandomSlopeModel()` then `fitKOGenomeGroupMetaAnalysis()`.
+- Difference between grouped KO responses:
+  `fitKORandomSlopeModel()` then `fitKOGenomeGroupMetaAnalysis()`, then
+  `compareKOGenomeGroups()`.
+- Global phylogenetic signal for KO responses:
+  `fitKORandomSlopeModel()` then `fitKOPhylogeneticSignal()`.
+- Responding subtree for a KO:
+  `fitKORandomSlopeModel()` then `scanKOClades()`.
+- Phylogenetically corrected mean KO response:
+  `fitKORandomSlopeModel()` then `fitKOPhylogeneticGLS()`.
+
+4. If the unit is a module or pathway:
+- Coherent KO-level effects within the set:
+  `fitKOMixedModel()` then `fitModuleMetaAnalysis()` or
+  `fitPathwayMetaAnalysis()`.
+- Total assigned activity of the set:
+  `fitModuleMixedModel()` or `fitPathwayMixedModel()`.
+- Response differs among genomes:
+  `fitModuleRandomSlopeModel()` or `fitPathwayRandomSlopeModel()`.
+- Direct contrast between two genome groups:
+  `fitModuleGroupInteractionModel()` or
+  `fitPathwayGroupInteractionModel()`.
+- Global phylogenetic signal:
+  `fitModuleRandomSlopeModel()` or `fitPathwayRandomSlopeModel()`, then
+  `fitModulePhylogeneticSignal()` or `fitPathwayPhylogeneticSignal()`.
+- Responding subtree:
+  `fitModuleRandomSlopeModel()` or `fitPathwayRandomSlopeModel()`, then
+  `scanModuleClades()` or `scanPathwayClades()`.
+- Phylogenetically corrected mean response:
+  `fitModuleRandomSlopeModel()` or `fitPathwayRandomSlopeModel()`, then
+  `fitModulePhylogeneticGLS()` or `fitPathwayPhylogeneticGLS()`.
+
+Then refine the call:
+
+- Use `variable = "..."` for a single categorical or continuous predictor.
+- Use `formula = ~ ... + ...` and `term = "..."` when you want additional
+  covariates but still want one focal effect.
+- Add `sampleBlock = "..."` for paired or repeated-measures samples.
+- Set `genomeOffset = TRUE` or `FALSE` deliberately when genome abundance
+  normalization matters for the biological question.
+- Use `genomeCorrelation = "brownian"` where supported when related genomes
+  should be correlated in the count model.
+
+If you prefer the same logic in R, use `findWorkflow()`.
 
 - If the question is "which individual KOs are associated with the variable?",
   use `fitKOMixedModel()`.
@@ -203,7 +274,7 @@ The mode choice matters because it changes the exact question being answered:
   current reaggregation workflow uses negative-binomial count models, and
   splitting memberships would create fractional pseudo-counts.
 
-So the current position of MTTK is:
+So the current position of mttk is:
 
 - not a replacement for `edgeR`, `DESeq2`, or `limma-voom`,
 - complementary infrastructure for nested metatranscriptomic data,
@@ -235,5 +306,5 @@ The current version already supports:
   module names and classes onto KO-level results.
 
 Gene-wise differential expression with `edgeR`, `DESeq2`, or `limma-voom`
-could still be used alongside MTTK, with MTTK handling the container,
+could still be used alongside mttk, with mttk handling the container,
 alignment, and hierarchical summaries around those analyses.

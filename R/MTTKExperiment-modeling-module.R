@@ -306,8 +306,8 @@ fitModuleGroupInteractionModel <- function(
 #'
 #' @inheritParams fitModuleMixedModel
 #' @param randomSlope Optional sample-level variable whose genome-specific slope
-#'   should be estimated. When `variable` is supplied, MTTK uses that variable.
-#'   When `formula` is supplied, `randomSlope` can be omitted only if MTTK can
+#'   should be estimated. When `variable` is supplied, mttk uses that variable.
+#'   When `formula` is supplied, `randomSlope` can be omitted only if mttk can
 #'   infer a single tested variable unambiguously.
 #'
 #' @return An `MTTKFit` with one row per module. The returned fit also stores

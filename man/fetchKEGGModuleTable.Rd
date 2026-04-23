@@ -23,7 +23,7 @@ An \code{S4Vectors::DataFrame}.
 \description{
 \code{fetchKEGGModuleTable()} retrieves KEGG module metadata directly from the
 KEGG MODULE database through \code{KEGGREST} and returns it in the standardized
-format used by MTTK.
+format used by mttk.
 }
 \details{
 The resulting table contains \code{module_id}, \code{module_name}, \code{module_class}, and

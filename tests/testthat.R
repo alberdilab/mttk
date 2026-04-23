@@ -1,4 +1,4 @@
 library(testthat)
-library(MTTK)
+library(mttk)
 
-test_check("MTTK")
+test_check("mttk")

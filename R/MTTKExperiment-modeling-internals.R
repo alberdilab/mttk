@@ -681,7 +681,7 @@
 
     if (grepl("\\|", formula_text)) {
         stop(
-            "Random effects should not be included in 'formula'; MTTK adds the supported genome-level random effects internally.",
+            "Random effects should not be included in 'formula'; mttk adds the supported genome-level random effects internally.",
             call. = FALSE
         )
     }
@@ -3102,7 +3102,7 @@
 
     if (!requireNamespace("glmmTMB", quietly = TRUE)) {
         stop(
-            "The 'glmmTMB' package must be installed to use mixed-model workflows in MTTK.",
+            "The 'glmmTMB' package must be installed to use mixed-model workflows in mttk.",
             call. = FALSE
         )
     }
@@ -3355,7 +3355,7 @@
 
     if (!requireNamespace("glmmTMB", quietly = TRUE)) {
         stop(
-            "The 'glmmTMB' package must be installed to use mixed-model workflows in MTTK.",
+            "The 'glmmTMB' package must be installed to use mixed-model workflows in mttk.",
             call. = FALSE
         )
     }
@@ -3534,7 +3534,7 @@
 
     if (!requireNamespace("glmmTMB", quietly = TRUE)) {
         stop(
-            "The 'glmmTMB' package must be installed to use mixed-model workflows in MTTK.",
+            "The 'glmmTMB' package must be installed to use mixed-model workflows in mttk.",
             call. = FALSE
         )
     }

@@ -11,7 +11,7 @@ compareKOGenomeGroups(x, reference = NULL, contrast = NULL, status = "ok")
 
 \item{reference}{Optional single reference group identifier. When \code{NULL} and
 \code{contrast = NULL}, all pairwise group comparisons are returned. When
-\code{reference} is supplied and \code{contrast = NULL}, MTTK compares that
+\code{reference} is supplied and \code{contrast = NULL}, mttk compares that
 reference group against every other available group.}
 
 \item{contrast}{Optional single contrast group identifier. When supplied, a

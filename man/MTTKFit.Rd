@@ -17,7 +17,7 @@ MTTKFit(results = NULL, info = list(), models = list())
 A valid \code{MTTKFit}.
 }
 \description{
-\code{MTTKFit()} builds a compact result container for MTTK modeling workflows.
+\code{MTTKFit()} builds a compact result container for mttk modeling workflows.
 The object behaves like an \code{S4Vectors::DataFrame}, with one row per modeled
 feature and columns for coefficient summaries, fit diagnostics, and feature
 metadata.

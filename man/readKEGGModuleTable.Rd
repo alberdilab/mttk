@@ -14,7 +14,7 @@ An \code{S4Vectors::DataFrame}.
 }
 \description{
 \code{readKEGGModuleTable()} imports a tab-separated KEGG module table and
-standardizes the main columns used by MTTK. The returned table uses
+standardizes the main columns used by mttk. The returned table uses
 \code{module_id}, \code{module_name}, \code{module_class}, and \code{module_definition} column
 names when those fields are available.
 }

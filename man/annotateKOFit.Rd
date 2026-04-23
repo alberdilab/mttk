@@ -36,7 +36,7 @@ An \code{MTTKFit} with appended annotation columns.
 \code{annotateKOFit()} appends KO-centered annotation columns from an
 \code{MTTKExperiment} onto an \code{MTTKFit}. This is intended for fits whose rows
 represent KO identifiers, such as the first KO-level mixed-model workflow in
-MTTK.
+mttk.
 }
 \details{
 By default the function follows two direct KO-centered mappings,

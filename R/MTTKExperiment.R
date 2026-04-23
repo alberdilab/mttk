@@ -1,7 +1,7 @@
 #' Construct an MTTKExperiment
 #'
-#' `MTTKExperiment()` creates the main container used by MTTK. It wraps
-#' [TreeSummarizedExperiment::TreeSummarizedExperiment()] and adds MTTK-specific
+#' `MTTKExperiment()` creates the main container used by mttk. It wraps
+#' [TreeSummarizedExperiment::TreeSummarizedExperiment()] and adds mttk-specific
 #' support for an explicit gene-level layer, a genome-level companion
 #' experiment, explicit mapping tables, and active hierarchy labels.
 #'

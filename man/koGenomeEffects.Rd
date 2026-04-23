@@ -19,7 +19,7 @@ combination and contains the conditional KO effect estimated for that genome.
 }
 \details{
 This workflow is intended as the first bridge between KO-level and
-genome-level analyses in MTTK. The returned table can be used to ask whether
+genome-level analyses in mttk. The returned table can be used to ask whether
 the same KO responds similarly or differently across genomes, and can later
 be joined to \code{genomeData(x)} for taxonomy-aware summaries.
 }

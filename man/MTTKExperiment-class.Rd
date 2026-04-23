@@ -47,9 +47,9 @@ relationship is naturally tree-structured.
 }
 }
 
-\section{MTTK metadata contract}{
+\section{mttk metadata contract}{
 
-MTTK-specific components are kept close to existing Bioconductor
+mttk-specific components are kept close to existing Bioconductor
 infrastructure:
 \itemize{
 \item \code{rownames(x)}, \code{colnames(x)}, and \code{rownames(genomeExperiment(x))} are the
@@ -78,7 +78,7 @@ in use.
 \section{Design notes}{
 
 Only \code{MTTKExperiment} is defined at this stage. Dedicated helper classes such
-as \code{MTTKHierarchy}, \code{MTTKFit}, and \code{MTTKNetwork} are intentionally deferred
+as \code{mttkHierarchy}, \code{MTTKFit}, and \code{mttkNetwork} are intentionally deferred
 until their storage contracts are clearer.
 }
 

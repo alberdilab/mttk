@@ -15,7 +15,7 @@ MTTKShowcase
 }
 \description{
 \code{MTTKShowcase} is a packaged \code{MTTKExperiment} intended for vignette-style
-walkthroughs of the main MTTK workflows.
+walkthroughs of the main mttk workflows.
 }
 \details{
 The object contains one gene-level assay (\code{rna_gene_counts}), two

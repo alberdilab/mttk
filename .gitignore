@@ -3,4 +3,6 @@
 ..Rcheck/
 MTTK.Rcheck/
 MTTK_*.tar.gz
+mttk.Rcheck/
+mttk_*.tar.gz
 .rlib/

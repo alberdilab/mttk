@@ -18,7 +18,7 @@ column per sample.
 \description{
 \code{aggregateToKOGenome()} collapses a gene-level assay to KO/genome pairs. The
 returned rows represent KO-within-genome observations, which are the units
-used by the first KO-level mixed-model workflow in MTTK.
+used by the first KO-level mixed-model workflow in mttk.
 }
 \details{
 Row metadata always includes \code{ko_id}, \code{genome_id}, \code{n_genes_pair}, and

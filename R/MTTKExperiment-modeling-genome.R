@@ -339,7 +339,7 @@
 #'   select which contrast to test. Supply exactly one of `variable` or `formula`.
 #' @param formula Optional one-sided or two-sided fixed-effect formula for the
 #'   sample-level covariates, for example `~ condition + pH` or
-#'   `rna_count ~ condition + pH`. Offsets are added internally by MTTK.
+#'   `rna_count ~ condition + pH`. Offsets are added internally by mttk.
 #'   Supply exactly one of `variable` or `formula`.
 #' @param term Optional character string naming the model term to test. Required
 #'   when `variable` refers to a factor with three or more levels (supply the
@@ -353,11 +353,11 @@
 #'   `colSums()` of the resolved genome-level response assay, a single
 #'   `colData(x)` column name, or a numeric vector with one value per sample.
 #' @param sampleBlock Optional sample-level blocking variable from
-#'   `colData(x)`. When supplied, MTTK adds a random intercept
+#'   `colData(x)`. When supplied, mttk adds a random intercept
 #'   `(1 | sample_block)` to account for repeated measures or paired samples.
 #' @param genomeOffset Logical; if `TRUE`, include
 #'   `offset(log(genome_abundance + offsetPseudocount))`. If `NULL` (the
-#'   default), MTTK uses genome-abundance normalization when `genomeAssay` is
+#'   default), mttk uses genome-abundance normalization when `genomeAssay` is
 #'   available in `genomeExperiment(x)`.
 #' @param genomeAssay Genome-level assay used when `genomeOffset = TRUE`.
 #' @param offsetPseudocount Non-negative pseudocount added to genome abundance

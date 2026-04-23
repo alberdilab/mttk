@@ -35,7 +35,7 @@ select which contrast to test. Supply exactly one of \code{variable} or \code{fo
 \item{formula}{Optional one-sided or two-sided fixed-effect formula for the
 sample-level covariates, for example \code{~ condition + salinity} or
 \code{rna_count ~ condition + salinity}. Offsets and genome-level random
-effects are added internally by MTTK. Supply exactly one of \code{variable} or
+effects are added internally by mttk. Supply exactly one of \code{variable} or
 \code{formula}.}
 
 \item{term}{Optional character string naming the model term to test. Required
@@ -49,7 +49,7 @@ tested term.}
 
 \item{genomeOffset}{Logical; if \code{TRUE}, include
 \code{offset(log(genome_abundance + offsetPseudocount))}. If \code{NULL} (the
-default), MTTK uses genome-abundance normalization when \code{genomeAssay} is
+default), mttk uses genome-abundance normalization when \code{genomeAssay} is
 available in \code{genomeExperiment(x)}.}
 
 \item{libSize}{Library-size offset specification. Use \code{NULL} to compute
@@ -57,7 +57,7 @@ available in \code{genomeExperiment(x)}.}
 numeric vector with one value per sample.}
 
 \item{sampleBlock}{Optional sample-level blocking variable from
-\code{colData(x)}. When supplied, MTTK adds a random intercept
+\code{colData(x)}. When supplied, mttk adds a random intercept
 \code{(1 | sample_block)} to account for repeated measures or paired samples.}
 
 \item{genomeCorrelation}{Genome-level correlation structure for the random
@@ -66,7 +66,7 @@ intercept. Use \code{"independent"} for the standard genome random intercept, or
 \code{glmmTMB::propto()}.}
 
 \item{phylogeny}{Optional \code{ape::phylo} object used when
-\code{genomeCorrelation = "brownian"}. If \code{NULL}, MTTK uses \code{genomeTree(x)}.}
+\code{genomeCorrelation = "brownian"}. If \code{NULL}, mttk uses \code{genomeTree(x)}.}
 
 \item{genomeAssay}{Genome-level assay used when \code{genomeOffset = TRUE}.}
 
@@ -77,7 +77,7 @@ before log-offset calculation.}
 the reference levels of factor-like sample covariates before model fitting.}
 
 \item{randomSlope}{Optional sample-level variable whose genome-specific slope
-should be modeled when \code{formula} is used. If omitted, MTTK uses the tested
+should be modeled when \code{formula} is used. If omitted, mttk uses the tested
 variable when it can be inferred unambiguously.}
 
 \item{keepFits}{Logical; if \code{TRUE}, store the backend \code{glmmTMB} model objects

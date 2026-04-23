@@ -16,7 +16,7 @@
 #' column must match `rownames(x)` exactly.
 #'
 #' @section Stored metadata:
-#' `metadata(x)$mttk_fit` is reserved for MTTK-specific fit metadata and may
+#' `metadata(x)$mttk_fit` is reserved for mttk-specific fit metadata and may
 #' contain:
 #'
 #' - `info`: a named list describing the model specification, backend, and

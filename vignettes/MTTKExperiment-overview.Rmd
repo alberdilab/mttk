@@ -1,24 +1,24 @@
 ---
-title: "Using MTTK for Hierarchical Metatranscriptomics"
-author: "MTTK authors"
-package: MTTK
+title: "Using mttk for Hierarchical Metatranscriptomics"
+author: "mttk authors"
+package: mttk
 output:
     rmarkdown::html_vignette:
         toc: true
 vignette: >
-    %\VignetteIndexEntry{Using MTTK for Hierarchical Metatranscriptomics}
+    %\VignetteIndexEntry{Using mttk for Hierarchical Metatranscriptomics}
     %\VignetteEngine{knitr::rmarkdown}
     %\VignetteEncoding{UTF-8}
 ---
 
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
-library(MTTK)
+library(mttk)
 ```
 
 # Overview
 
-MTTK is designed for genome-resolved metatranscriptomics, where the analysis is
+mttk is designed for genome-resolved metatranscriptomics, where the analysis is
 not only about a flat gene-by-sample matrix.
 
 In this setting:
@@ -88,7 +88,7 @@ dnaGenomeCounts(x)
 
 # Analysis Themes
 
-The easiest way to choose an MTTK workflow is to start from the biological
+The easiest way to choose an mttk workflow is to start from the biological
 question, then decide whether the signal of interest is:
 
 - a change in individual genes or whole genomes,
@@ -102,10 +102,78 @@ question sequentially.
 ## A companion math vignette
 
 This overview is organized around biological questions and practical choices.
-If you also want a gentle explanation of why MTTK uses negative-binomial
+If you also want a gentle explanation of why mttk uses negative-binomial
 models, why genome random effects are useful, and what the main model
 equations mean, see the companion vignette
-`How MTTK Models Work`.
+`How mttk Models Work`.
+
+## Static decision tree
+
+Use this quick tree when you want to move from a biological question to the
+most relevant mttk function.
+
+1. What is your primary unit of interest?
+- Gene: use `fitGeneModel()`.
+- Genome: go to step 2.
+- KO: go to step 3.
+- Module or pathway: go to step 4.
+
+2. If the unit is a genome:
+- Overall response to a condition or continuous variable: `fitGenomeModel()`.
+- Coherence within a genome group: `fitGenomeModel()` then
+  `fitGenomeGroupMetaAnalysis()`.
+- Global phylogenetic signal: `fitGenomeModel()` then
+  `fitGenomePhylogeneticSignal()`.
+- Responding subtree: `fitGenomeModel()` then `scanGenomeClades()`.
+- Phylogenetically corrected mean response: `fitGenomeModel()` then
+  `fitGenomePhylogeneticGLS()`.
+
+3. If the unit is a KO:
+- Shared KO response across genomes: `fitKOMixedModel()`.
+- KO response differs among genomes: `fitKORandomSlopeModel()`.
+- Direct KO contrast between two genome groups: `fitKOGroupInteractionModel()`.
+- Coherence within a genome group: `fitKORandomSlopeModel()` then
+  `fitKOGenomeGroupMetaAnalysis()`.
+- Difference between grouped KO responses:
+  `fitKORandomSlopeModel()` then `fitKOGenomeGroupMetaAnalysis()`, then
+  `compareKOGenomeGroups()`.
+- Global phylogenetic signal: `fitKORandomSlopeModel()` then
+  `fitKOPhylogeneticSignal()`.
+- Responding subtree: `fitKORandomSlopeModel()` then `scanKOClades()`.
+- Phylogenetically corrected mean response: `fitKORandomSlopeModel()` then
+  `fitKOPhylogeneticGLS()`.
+
+4. If the unit is a module or pathway:
+- Coherent KO-level effects within the set: `fitKOMixedModel()` then
+  `fitModuleMetaAnalysis()` or `fitPathwayMetaAnalysis()`.
+- Total assigned activity: `fitModuleMixedModel()` or
+  `fitPathwayMixedModel()`.
+- Response differs among genomes: `fitModuleRandomSlopeModel()` or
+  `fitPathwayRandomSlopeModel()`.
+- Direct contrast between genome groups: `fitModuleGroupInteractionModel()` or
+  `fitPathwayGroupInteractionModel()`.
+- Global phylogenetic signal: `fitModuleRandomSlopeModel()` or
+  `fitPathwayRandomSlopeModel()`, then `fitModulePhylogeneticSignal()` or
+  `fitPathwayPhylogeneticSignal()`.
+- Responding subtree: `fitModuleRandomSlopeModel()` or
+  `fitPathwayRandomSlopeModel()`, then `scanModuleClades()` or
+  `scanPathwayClades()`.
+- Phylogenetically corrected mean response: `fitModuleRandomSlopeModel()` or
+  `fitPathwayRandomSlopeModel()`, then `fitModulePhylogeneticGLS()` or
+  `fitPathwayPhylogeneticGLS()`.
+
+Then refine the call:
+
+- Use `variable = "..."` for a single categorical or continuous predictor.
+- Use `formula = ~ ... + ...` and `term = "..."` when you want additional
+  covariates but still want one focal effect.
+- Add `sampleBlock = "..."` for paired or repeated-measures samples.
+- Set `genomeOffset = TRUE` or `FALSE` deliberately when genome abundance
+  normalization matters for the biological question.
+- Use `genomeCorrelation = "brownian"` where supported when related genomes
+  should be correlated in the count model.
+
+If you prefer the same logic in R, use `findWorkflow()`.
 
 ## Gene and genome response questions
 
@@ -265,7 +333,7 @@ Typical biological questions are:
 
 ## KO-level mixed models
 
-KO-level modeling is the main function-centered workflow in MTTK. Gene-level
+KO-level modeling is the main function-centered workflow in mttk. Gene-level
 RNA is first aggregated to KO-within-genome observations, then modeled with a
 negative-binomial mixed model.
 
@@ -525,7 +593,7 @@ fitPathwayPhylogeneticGLS(pathway_rs_fit, x)
 
 # Transparent aggregation helpers
 
-MTTK also includes explicit aggregation helpers for users who want to inspect
+mttk also includes explicit aggregation helpers for users who want to inspect
 the intermediate summarized data before fitting a model.
 
 ```{r}

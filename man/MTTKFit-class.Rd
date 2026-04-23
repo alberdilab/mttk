@@ -24,7 +24,7 @@ column must match \code{rownames(x)} exactly.
 
 \section{Stored metadata}{
 
-\code{metadata(x)$mttk_fit} is reserved for MTTK-specific fit metadata and may
+\code{metadata(x)$mttk_fit} is reserved for mttk-specific fit metadata and may
 contain:
 \itemize{
 \item \code{info}: a named list describing the model specification, backend, and

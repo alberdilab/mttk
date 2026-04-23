@@ -2,7 +2,7 @@
 #'
 #' `aggregateToKOGenome()` collapses a gene-level assay to KO/genome pairs. The
 #' returned rows represent KO-within-genome observations, which are the units
-#' used by the first KO-level mixed-model workflow in MTTK.
+#' used by the first KO-level mixed-model workflow in mttk.
 #'
 #' Row metadata always includes `ko_id`, `genome_id`, `n_genes_pair`, and
 #' `n_links_pair`. Available `genomeData(x)` columns are appended when they can
@@ -52,7 +52,7 @@ aggregateToKOGenome <- function(x, assay = "rna_gene_counts") {
 #' @param formula Optional one-sided or two-sided fixed-effect formula for the
 #'   sample-level covariates, for example `~ condition + pH` or
 #'   `rna_count ~ condition + pH`. Offsets and genome-level random effects are
-#'   added internally by MTTK. Supply exactly one of `variable` or `formula`.
+#'   added internally by mttk. Supply exactly one of `variable` or `formula`.
 #' @param term Optional character string naming the model term to test. Required
 #'   when `variable` refers to a factor with three or more levels (supply the
 #'   contrast name, e.g. `"conditionB"`) or when `formula` defines more than one
@@ -63,11 +63,11 @@ aggregateToKOGenome <- function(x, assay = "rna_gene_counts") {
 #'   `colSums(rnaGeneCounts(x))`, a single `colData(x)` column name, or a
 #'   numeric vector with one value per sample.
 #' @param sampleBlock Optional sample-level blocking variable from
-#'   `colData(x)`. When supplied, MTTK adds a random intercept
+#'   `colData(x)`. When supplied, mttk adds a random intercept
 #'   `(1 | sample_block)` to account for repeated measures or paired samples.
 #' @param genomeOffset Logical; if `TRUE`, include
 #'   `offset(log(genome_abundance + offsetPseudocount))`. If `NULL` (the
-#'   default), MTTK uses genome-abundance normalization when `genomeAssay` is
+#'   default), mttk uses genome-abundance normalization when `genomeAssay` is
 #'   available in `genomeExperiment(x)`.
 #' @param genomeAssay Genome-level assay used when `genomeOffset = TRUE`.
 #' @param offsetPseudocount Non-negative pseudocount added to genome abundance
@@ -159,7 +159,7 @@ makeKOMixedModelData <- function(
 #' @param formula Optional one-sided or two-sided fixed-effect formula for the
 #'   sample-level covariates, for example `~ condition + salinity` or
 #'   `rna_count ~ condition + salinity`. Offsets and genome-level random
-#'   effects are added internally by MTTK. Supply exactly one of `variable` or
+#'   effects are added internally by mttk. Supply exactly one of `variable` or
 #'   `formula`.
 #' @param term Optional character string naming the model term to test. Required
 #'   when `variable` refers to a factor with three or more levels (supply the
@@ -171,17 +171,17 @@ makeKOMixedModelData <- function(
 #'   `colSums(rnaGeneCounts(x))`, a single `colData(x)` column name, or a
 #'   numeric vector with one value per sample.
 #' @param sampleBlock Optional sample-level blocking variable from
-#'   `colData(x)`. When supplied, MTTK adds a random intercept
+#'   `colData(x)`. When supplied, mttk adds a random intercept
 #'   `(1 | sample_block)` to account for repeated measures or paired samples.
 #' @param genomeCorrelation Genome-level correlation structure for the random
 #'   intercept. Use `"independent"` for the standard genome random intercept, or
 #'   `"brownian"` to model genome-level covariance from a phylogenetic tree via
 #'   `glmmTMB::propto()`.
 #' @param phylogeny Optional `ape::phylo` object used when
-#'   `genomeCorrelation = "brownian"`. If `NULL`, MTTK uses `genomeTree(x)`.
+#'   `genomeCorrelation = "brownian"`. If `NULL`, mttk uses `genomeTree(x)`.
 #' @param genomeOffset Logical; if `TRUE`, include
 #'   `offset(log(genome_abundance + offsetPseudocount))`. If `NULL` (the
-#'   default), MTTK uses genome-abundance normalization when `genomeAssay` is
+#'   default), mttk uses genome-abundance normalization when `genomeAssay` is
 #'   available in `genomeExperiment(x)`.
 #' @param genomeAssay Genome-level assay used when `genomeOffset = TRUE`.
 #' @param offsetPseudocount Non-negative pseudocount added to genome abundance
@@ -351,7 +351,7 @@ fitKOGroupInteractionModel <- function(
 #'
 #' @inheritParams fitKOMixedModel
 #' @param randomSlope Optional sample-level variable whose genome-specific slope
-#'   should be modeled when `formula` is used. If omitted, MTTK uses the tested
+#'   should be modeled when `formula` is used. If omitted, mttk uses the tested
 #'   variable when it can be inferred unambiguously.
 #'
 #' @return An `MTTKFit` with one row per KO. The returned fit also stores

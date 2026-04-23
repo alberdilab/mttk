@@ -47,7 +47,7 @@ test_that("replacement accessors update an MTTKExperiment", {
     expect_true(methods::validObject(x))
 })
 
-test_that("replacement accessors can clear MTTK-specific metadata", {
+test_that("replacement accessors can clear mttk-specific metadata", {
     x <- make_test_mttk()
 
     genomeData(x) <- NULL

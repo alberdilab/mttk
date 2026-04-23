@@ -57,7 +57,7 @@ stored in that fit, not on the KO-wide fixed effect. By default a
 random-effects inverse-variance meta-analysis with a DerSimonian-Laird
 \code{tau^2} estimate is used.
 
-The per-genome standard errors are approximate. MTTK derives them from the
+The per-genome standard errors are approximate. mttk derives them from the
 fixed-effect variance and the conditional random-slope variance, without
 modeling the full cross-covariance between those components. As a result,
 this workflow should be interpreted as an approximate synthesis layer for

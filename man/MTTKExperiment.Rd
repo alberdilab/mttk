@@ -74,8 +74,8 @@ Gene-level and genome-level assays should use explicit names such as
 A valid \code{MTTKExperiment}.
 }
 \description{
-\code{MTTKExperiment()} creates the main container used by MTTK. It wraps
-\code{\link[TreeSummarizedExperiment:TreeSummarizedExperiment-constructor]{TreeSummarizedExperiment::TreeSummarizedExperiment()}} and adds MTTK-specific
+\code{MTTKExperiment()} creates the main container used by mttk. It wraps
+\code{\link[TreeSummarizedExperiment:TreeSummarizedExperiment-constructor]{TreeSummarizedExperiment::TreeSummarizedExperiment()}} and adds mttk-specific
 support for an explicit gene-level layer, a genome-level companion
 experiment, explicit mapping tables, and active hierarchy labels.
 }
