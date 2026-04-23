@@ -56,6 +56,13 @@ three controls and three oxygen-pulse treatments.
 genomeData(x)
 ```
 
+The sample metadata include both categorical and continuous variables that are
+useful for illustrating different model types.
+
+```{r}
+SummarizedExperiment::colData(x)
+```
+
 The container keeps gene-level RNA and genome-level data separate but linked:
 
 ```{r}
@@ -79,51 +86,77 @@ rnaGenomeCounts(x)
 dnaGenomeCounts(x)
 ```
 
-# Choosing a model
+# Analysis Themes
 
-The most useful way to approach MTTK is to start from the biological question.
+The easiest way to choose an MTTK workflow is to start from the biological
+question, then decide whether the signal of interest is:
 
-- Use `fitGeneModel()` when the question is "which individual genes change?"
-- Use `fitGenomeModel()` when the question is "which genomes shift overall
-  transcription?"
-- Use `fitGenomePhylogeneticSignal()` when the question is "do closely related
-  genomes tend to respond similarly overall?"
-- Use `scanGenomeClades()` when the question is "is there a subtree in the
-  genome phylogeny with an unusually high or low response?"
-- Use `fitGenomeGroupMetaAnalysis()` when the question is "do genomes from the
-  same clade or domain respond coherently?"
-- Use `fitKOMixedModel()` when the question is "which functions, represented as
-  KOs, respond across genomes?"
-- Use `fitKORandomSlopeModel()` when the question is "does the same KO behave
-  differently in different genomes?"
-- Use `fitKOGroupInteractionModel()` when the question is "does the KO
-  response differ directly between two genome groups?"
-- Use `fitKOPhylogeneticSignal()` when the question is "for a given KO, do the
-  genome-specific KO responses follow the phylogeny?"
-- Use `scanKOClades()` when the question is "is there a subtree where a KO
-  responds in a distinct way?"
-- Use `fitKOGenomeGroupMetaAnalysis()` and `compareKOGenomeGroups()` when the
-  question is "within or between clades, do KO responses differ?"
-- Use `fitModuleMetaAnalysis()` or `fitPathwayMetaAnalysis()` when the question
-  is "do the KOs assigned to this higher-level function show a coherent
+- a change in individual genes or whole genomes,
+- a shared response of a function across genomes,
+- a heterogeneous response that differs among genomes or clades,
+- or a response pattern that follows the genome phylogeny.
+
+This vignette groups the main workflows that way instead of listing every
+question sequentially.
+
+## A companion math vignette
+
+This overview is organized around biological questions and practical choices.
+If you also want a gentle explanation of why MTTK uses negative-binomial
+models, why genome random effects are useful, and what the main model
+equations mean, see the companion vignette
+`How MTTK Models Work`.
+
+## Gene and genome response questions
+
+Use these workflows when the primary response unit is a gene or a whole genome.
+
+- `fitGeneModel()`: "Which transporter, stress-response, or respiration genes
+  change between treatments?"
+- `fitGenomeModel()`: "Which MAGs shift their overall transcriptional activity
+  between conditions, or along a salinity or oxygen gradient?"
+- `fitGenomeGroupMetaAnalysis()`: "Do genomes from the same domain or clade
+  respond coherently?"
+
+## Function-centered questions
+
+Use these workflows when the main biological unit is a KO, module, or pathway.
+
+- `fitKOMixedModel()`: "Which KOs respond across genomes?"
+- `fitModuleMetaAnalysis()` and `fitPathwayMetaAnalysis()`: "Do the KOs
+  assigned to this module or pathway show a coherent direction of change?"
+- `fitModuleMixedModel()` and `fitPathwayMixedModel()`: "Does the total RNA
+  assigned to this higher-level function change?"
+
+## Heterogeneity across genomes or clades
+
+Use these workflows when you expect the same function to behave differently in
+different genomes.
+
+- `fitKORandomSlopeModel()`: "Does the same KO increase in some genomes but
+  decrease in others?"
+- `fitKOGroupInteractionModel()`: "Is that KO response different in Archaea
+  versus Bacteria?"
+- `fitKOGenomeGroupMetaAnalysis()` and `compareKOGenomeGroups()`: "Within or
+  between clades, are KO responses coherent or different?"
+- `fitModuleRandomSlopeModel()` and `fitPathwayRandomSlopeModel()`: the same
+  question at module or pathway level.
+
+## Phylogeny-aware questions
+
+Use these workflows when the genome tree is biologically more informative than
+a single taxonomy column.
+
+- `fitGenomePhylogeneticSignal()`: "Do closely related genomes tend to respond
+  similarly overall?"
+- `scanGenomeClades()`: "Is there a subtree of genomes with a shifted
   response?"
-- Use `fitModuleMixedModel()` or `fitPathwayMixedModel()` when the question is
-  "does total module/pathway activity change?"
-- Use `fitModuleGroupInteractionModel()` or
-  `fitPathwayGroupInteractionModel()` when the question is "does the
-  module/pathway response differ directly between two genome groups?"
-- Use `fitModuleRandomSlopeModel()` or `fitPathwayRandomSlopeModel()` when the
-  question is "does the same module/pathway respond differently in different
-  genomes?"
+- `fitKOPhylogeneticSignal()` and `scanKOClades()`: the same questions for KO
+  genome-specific responses.
+- `fitModulePhylogeneticSignal()` and `fitPathwayPhylogeneticSignal()`: the
+  same follow-up for module and pathway random-slope fits.
 
-The important distinction is between:
-
-- effect-size synthesis upward from KO results, and
-- re-aggregating counts and refitting a model at a higher level.
-
-Those answer different questions and should be chosen deliberately.
-
-## Repeated Measures Or Blocked Samples
+## Repeated measures or blocked samples
 
 Most modeling workflows also support repeated measures or paired samples
 through a sample-level blocking column in `colData(x)`.
@@ -141,26 +174,46 @@ fitKOMixedModel(
 )
 ```
 
-Use that option when the question is still KO/gene/genome/module/pathway
+Use that option when the question is still gene/KO/genome/module/pathway
 response, but the samples are not independent because they come from matched
-sites, subjects, vessels, or repeated sampling units.
+stations, subjects, vessels, or repeated sampling units.
 
-# Question 1: Which genes change?
+# Group 1: Expression Shifts In Genes And Genomes
 
-Suppose you want to identify genes whose RNA abundance shifts between control
-and oxygen-pulse incubations, while optionally normalizing by parent-genome
-abundance.
+These workflows are most useful when the biological interpretation stays close
+to the measured entity itself.
+
+Typical biological questions are:
+
+- "Which stress-response genes increase after an oxygen pulse?"
+- "Which genes are associated with dissolved oxygen concentration?"
+- "Which MAGs show an overall transcriptional activation under treatment?"
+- "Which MAGs track a salinity gradient across incubations?"
+
+## Gene-level changes
+
+For a categorical variable such as treatment group, `fitGeneModel()` gives the
+most direct gene-level answer.
 
 ```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
 gene_fit <- fitGeneModel(x, variable = "condition")
-fitTable(gene_fit, sortBy = "q_value", n = 8)
+fitTable(gene_fit, sortBy = "q_value", n = 6)
 ```
 
-This is the most direct workflow when the target of inference is the individual
-gene.
+For a continuous variable, fit the same model with the continuous column
+directly. In the showcase experiment, `oxygen` can be read as an oxygen
+availability gradient across incubations.
 
-If you want to adjust for additional sample covariates while still testing one
-focal effect, use a formula and select the term explicitly.
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+fitTable(
+    fitGeneModel(x, variable = "oxygen"),
+    sortBy = "q_value",
+    n = 6
+)
+```
+
+If you need a focal categorical effect while also adjusting for a continuous
+covariate, use a formula and select the tested term explicitly.
 
 ```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
 fitGeneModel(
@@ -170,99 +223,135 @@ fitGeneModel(
 )
 ```
 
-# Question 2: Which genomes shift overall activity?
+## Genome-level shifts
 
-Now suppose the question moves from genes to genomes: which MAGs show an
-overall transcriptional response after accounting for library size and genome
-abundance?
+Genome-level modeling is the right choice when the question moves from genes to
+MAGs, for example "which genomes become more transcriptionally active during
+oxygen exposure?"
 
 ```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
 genome_fit <- fitGenomeModel(x, variable = "condition")
 fitTable(genome_fit, sortBy = "q_value")
 ```
 
-If the next question is whether broader groups of genomes respond coherently,
-the genome-level results can be summarized by a grouping column in
-`genomeData(x)`.
+The same interface also supports continuous predictors. For example, this asks
+which genomes vary with salinity across incubations.
 
 ```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
-genome_domain_fit <- fitGenomeGroupMetaAnalysis(genome_fit, x, group = "domain")
-genome_domain_fit
+fitTable(
+    fitGenomeModel(x, variable = "salinity"),
+    sortBy = "q_value"
+)
 ```
 
-This is useful for questions such as "do archaeal MAGs tend to respond
-similarly?" even when the individual genomes are not identical in magnitude.
-
-## Following genome responses with the phylogeny
-
-When the genome relationships are better represented by a tree than by a single
-label column, MTTK can test whether genome-level responses show overall
-phylogenetic signal.
+If the follow-up question is whether broader genome groups respond coherently,
+summarize those genome-level effects by a grouping column in `genomeData(x)`.
 
 ```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
-fitGenomePhylogeneticSignal(genome_fit, x, nPerm = 99)
+fitGenomeGroupMetaAnalysis(genome_fit, x, group = "domain")
 ```
 
-That workflow asks whether more closely related genomes tend to have more
-similar fitted responses.
+# Group 2: Shared Functional Responses Across Genomes
 
-If the question is more local than global, scan the rooted tree for clades with
-shifted mean responses.
+These workflows are for questions where the main signal of interest is a
+function rather than an individual gene.
 
-```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
-scanGenomeClades(genome_fit, x, nPerm = 99, minTips = 2)
-```
+Typical biological questions are:
 
-This is useful for questions such as "is there a subtree of related genomes
-that becomes more transcriptionally active during the oxygen pulse?"
+- "Which respiratory or oxidative-stress KOs respond across genomes?"
+- "Which KOs are associated with low oxygen?"
+- "Do the KOs in a module move coherently?"
+- "Does total pathway activity increase under treatment?"
 
-If the question is instead "what is the average genome response after
-accounting for phylogenetic covariance?", use the Brownian GLS follow-up.
-
-```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
-fitGenomePhylogeneticGLS(genome_fit, x)
-```
-
-This uses the fitted genome responses as the input and estimates a
-phylogenetically corrected mean response rather than a global signal statistic.
-
-# Question 3: Which KOs respond across genomes?
+## KO-level mixed models
 
 KO-level modeling is the main function-centered workflow in MTTK. Gene-level
 RNA is first aggregated to KO-within-genome observations, then modeled with a
 negative-binomial mixed model.
 
-In a real study, this is the right question when you care about conserved
-functions such as stress response, respiration, or nitrogen metabolism across
-many genomes at once.
-
 ```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
 ko_fit <- fitKOMixedModel(x, variable = "condition")
-fitTable(annotateKOFit(ko_fit, x), sortBy = "q_value")
+fitTable(annotateKOFit(ko_fit, x), sortBy = "q_value", n = 6)
 ```
 
-Here the mixed model uses `genome_id` as a random intercept, so the same KO can
-be modeled across multiple parent genomes.
+This is the right workflow when the main question is categorical, such as
+"which KOs change between control and oxygen-pulse incubations?"
 
-If closely related genomes are expected to share baseline KO activity, use a
-Brownian phylogenetic genome effect instead of independent genome intercepts.
+The same model also works for continuous variables. Here the question is more
+like "which KOs track oxygen availability across samples?"
 
 ```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
-fitKOMixedModel(x, variable = "condition", genomeCorrelation = "brownian")
+ko_fit_oxygen <- fitKOMixedModel(x, variable = "oxygen")
+fitTable(annotateKOFit(ko_fit_oxygen, x), sortBy = "q_value", n = 6)
 ```
 
-The same workflow can adjust for additional sample covariates while keeping one
-KO-level condition term as the target of inference.
+If closely related genomes are expected to share baseline KO activity, replace
+independent genome intercepts with a Brownian phylogenetic genome effect.
 
 ```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
 fitKOMixedModel(
     x,
-    formula = ~ condition + oxygen,
-    term = "condition"
+    variable = "condition",
+    genomeCorrelation = "brownian"
 )
 ```
 
-# Question 4: Does the same KO behave differently in different genomes?
+## Higher-level functions from KO effects
+
+When the question is whether the member KOs of a module or pathway move in a
+coherent direction, keep KO modeling as the primary inferential layer and
+summarize upward afterward.
+
+This is often the best match to questions such as:
+
+- "Do oxidative-stress modules show a coordinated response?"
+- "Do the KOs in this pathway become more strongly associated with oxygen?"
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+module_meta <- fitModuleMetaAnalysis(ko_fit_oxygen, x, membershipMode = "split")
+pathway_meta <- fitPathwayMetaAnalysis(ko_fit_oxygen, x, membershipMode = "split")
+
+fitTable(module_meta, sortBy = "q_value", n = 6)
+fitTable(pathway_meta, sortBy = "q_value", n = 6)
+```
+
+For overlapping KO annotations, `membershipMode = "split"` is usually the most
+conservative default because it divides a KO contribution across its assigned
+modules or pathways.
+
+## Total module or pathway activity
+
+Sometimes the biological question is not about coherence of KO effects, but
+about the total RNA assigned to a higher-level function. In that case the
+appropriate workflow is to re-aggregate counts and refit the model directly at
+module or pathway level.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+module_fit <- fitModuleMixedModel(x, variable = "condition")
+pathway_fit <- fitPathwayMixedModel(x, variable = "condition")
+
+fitTable(module_fit, sortBy = "q_value", n = 6)
+fitTable(pathway_fit, sortBy = "q_value", n = 6)
+```
+
+This is the direct count-model answer to questions such as "does total RNA
+assigned to this pathway increase during the oxygen pulse?"
+
+There is no count-side `split` mode, because these workflows fit count models,
+and splitting memberships would create fractional pseudo-counts instead of
+observed counts.
+
+# Group 3: Heterogeneous Responses Across Genomes And Clades
+
+These workflows are for questions where a shared average effect is not enough.
+
+Typical biological questions are:
+
+- "Does the same KO increase in bacteria but decrease in archaea?"
+- "Does this pathway respond strongly in only part of the community?"
+- "Are KO responses coherent within domains but different between them?"
+
+## KO random-slope models
 
 Some functions are conserved, but their regulation is not. A KO random-slope
 model asks whether the KO-level response varies among genomes rather than
@@ -270,19 +359,18 @@ assuming one common genome effect.
 
 ```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
 ko_rs_fit <- fitKORandomSlopeModel(x, variable = "condition", genomeOffset = FALSE)
-fitTable(ko_rs_fit, sortBy = "q_value")
+fitTable(ko_rs_fit, sortBy = "q_value", n = 6)
 ```
 
 The genome-specific conditional KO effects can then be inspected directly.
 
 ```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
 ko_genome <- koGenomeEffects(ko_rs_fit)
-ko_genome[ko_genome$ko_id == "K10002", c("ko_id", "genome_id", "conditional_effect_estimate")]
+ko_genome[
+    ko_genome$ko_id == "K10002",
+    c("ko_id", "genome_id", "conditional_effect_estimate")
+]
 ```
-
-That is the right follow-up when the question is something like:
-"does the same stress-response KO increase in bacteria but decrease in
-archaea?"
 
 If those genome-specific KO responses are expected to be phylogenetically
 structured, the same workflow can fit a joint Brownian intercept-slope
@@ -297,11 +385,10 @@ fitKORandomSlopeModel(
 )
 ```
 
-## Directly testing KO differences between genome groups
+## Direct KO differences between genome groups
 
-If the question is specifically whether the KO response differs between two
-genome groups, fit a direct interaction model rather than summarizing random
-slope estimates afterward.
+If the biological question is explicitly comparative, such as "is this KO more
+strongly induced in Archaea than in Bacteria?", fit a direct interaction model.
 
 ```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
 ko_group_fit <- fitKOGroupInteractionModel(
@@ -312,30 +399,22 @@ ko_group_fit <- fitKOGroupInteractionModel(
     genomeOffset = FALSE
 )
 
-fitTable(ko_group_fit, sortBy = "q_value")
+fitTable(ko_group_fit, sortBy = "q_value", n = 6)
 ```
 
-This is useful for questions such as "is the condition effect for this KO
-different in Archaea versus Bacteria, after adjusting for salinity?"
+This example combines a categorical tested term (`condition`) with a
+continuous adjustment variable (`salinity`).
 
-## Summarizing KO responses within genome groups
+## Summarizing and comparing KO responses by genome group
 
-If you want to ask whether genomes in the same domain or clade show a coherent
-response for a KO, summarize the KO genome effects by a genome grouping
-variable.
+If the question is not "does the effect differ directly?" but rather "are the
+genome-specific KO responses coherent within a group, and how do groups
+compare?", summarize the random-slope fit within genome groups.
 
 ```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
 ko_domain_fit <- fitKOGenomeGroupMetaAnalysis(ko_rs_fit, x, group = "domain")
-fitTable(ko_domain_fit, sortBy = "q_value")
+fitTable(ko_domain_fit, sortBy = "q_value", n = 6)
 ```
-
-This workflow meta-analyzes the genome-specific KO effects within each group.
-
-## Comparing KO responses between genome groups
-
-If the question is not only whether a KO is coherent within a group, but
-whether the KO response differs between groups, compare the grouped KO results
-directly.
 
 ```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
 compareKOGenomeGroups(
@@ -345,171 +424,90 @@ compareKOGenomeGroups(
 )
 ```
 
-This is especially useful for questions such as "is this KO more strongly
-induced in archaea than in bacteria?"
+## Module and pathway heterogeneity
 
-## Following KO responses with the phylogeny
-
-The same KO random-slope fit can also be summarized against the genome
-phylogeny instead of a taxonomic label.
-
-```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
-fitKOPhylogeneticSignal(ko_rs_fit, x, nPerm = 99, minGenomes = 3)
-```
-
-This asks whether closely related genomes tend to show similar KO-specific
-responses.
-
-If the goal is to localize that pattern, scan the rooted tree for clades with
-distinct KO responses.
-
-```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
-scanKOClades(ko_rs_fit, x, nPerm = 99, minTips = 2, minGenomes = 3)
-```
-
-This is the right follow-up for questions such as "is there a related subset of
-genomes in which this KO is strongly induced, while the rest of the tree shows
-a weaker or opposite response?"
-
-If the question is "what is the average KO response after accounting for
-phylogenetic covariance among genomes?", fit the Brownian GLS summary instead.
-
-```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
-fitKOPhylogeneticGLS(ko_rs_fit, x)
-```
-
-This is useful when the goal is a phylogenetically corrected KO-level mean
-response, rather than a signal test or clade-localization step.
-
-# Question 5: Do higher-level functions show coherent KO-level responses?
-
-When a module or pathway contains several KOs, one useful question is whether
-the KO-level responses within that set are moving in a coherent direction.
-
-That is what the module/pathway meta-analysis layer is for.
-
-```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
-module_meta <- fitModuleMetaAnalysis(ko_fit, x)
-pathway_meta <- fitPathwayMetaAnalysis(ko_fit, x)
-
-fitTable(module_meta, sortBy = "q_value")
-fitTable(pathway_meta, sortBy = "q_value")
-```
-
-This is a good choice when you want to keep KO-level modeling as the primary
-inferential layer and summarize upward afterward.
-
-If the question is instead whether the higher-level function responds
-differently between two genome groups, use a direct interaction model.
-
-```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
-module_group_fit <- fitModuleGroupInteractionModel(
-    x,
-    variable = "condition",
-    group = "domain",
-    genomeOffset = FALSE
-)
-
-pathway_group_fit <- fitPathwayGroupInteractionModel(
-    x,
-    variable = "condition",
-    group = "domain",
-    genomeOffset = FALSE
-)
-
-fitTable(module_group_fit, sortBy = "q_value")
-fitTable(pathway_group_fit, sortBy = "q_value")
-```
-
-This is the direct count-model answer to questions such as "does this pathway
-respond more strongly in archaea than in bacteria?"
-
-## Choosing a membership mode for meta-analysis
-
-KO-to-module and KO-to-pathway mappings can be many-to-many, so MTTK lets you
-choose how overlapping memberships are handled.
-
-- `duplicate`: every KO contributes fully to every mapped set.
-- `split`: a KO contribution is divided across its memberships.
-- `exclusive`: only uniquely assigned KOs are kept.
-
-For overlapping functional annotations, `split` is often the most conservative
-default when you want to reduce the influence of broadly annotated KOs.
-
-```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
-fitModuleMetaAnalysis(ko_fit, x, membershipMode = "split")
-```
-
-# Question 6: Does total module or pathway activity change?
-
-Sometimes the target is not coherence of KO effects, but total RNA assigned to
-a higher-level function. In that case the right workflow is to re-aggregate the
-counts and refit the mixed model at the module or pathway level.
-
-```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
-module_fit <- fitModuleMixedModel(x, variable = "condition")
-pathway_fit <- fitPathwayMixedModel(x, variable = "condition")
-
-fitTable(module_fit, sortBy = "q_value")
-fitTable(pathway_fit, sortBy = "q_value")
-```
-
-This answers a different question from `fitModuleMetaAnalysis()` and
-`fitPathwayMetaAnalysis()`.
-
-For count reaggregation, MTTK supports:
-
-- `duplicate` for total assigned activity,
-- `exclusive` for uniquely assigned activity only.
-
-There is no count-side `split` mode, because these workflows fit count models,
-and splitting memberships would create fractional pseudo-counts instead of
-observed counts.
-
-If the genomes are phylogenetically structured, the same total-activity model
-can use Brownian covariance among genomes directly in the count fit.
-
-```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
-fitModuleMixedModel(x, variable = "condition", genomeCorrelation = "brownian")
-```
-
-# Question 7: Do modules or pathways respond differently across genomes?
-
-The random-slope module/pathway workflows extend the total-activity model to
-allow genome-specific responses.
-
-These are useful when the biological question is:
-"does the same pathway increase in some genomes but not in others?"
-
-When related genomes are expected to share both baseline activity and response
-direction, the same random-slope workflows can use Brownian phylogenetic
-intercept and slope terms.
-
-```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
-fitModuleRandomSlopeModel(
-    x,
-    variable = "condition",
-    genomeCorrelation = "brownian",
-    genomeOffset = FALSE
-)
-```
+The same kind of heterogeneity can also be asked at module or pathway level.
 
 ```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
 module_rs_fit <- fitModuleRandomSlopeModel(x, variable = "condition", genomeOffset = FALSE)
 pathway_rs_fit <- fitPathwayRandomSlopeModel(x, variable = "condition", genomeOffset = FALSE)
 
-fitTable(module_rs_fit, sortBy = "q_value")
-fitTable(pathway_rs_fit, sortBy = "q_value")
+fitTable(module_rs_fit, sortBy = "q_value", n = 6)
+fitTable(pathway_rs_fit, sortBy = "q_value", n = 6)
 ```
-
-The genome-specific conditional effects can be extracted just as for KO
-random-slope models.
 
 ```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
 moduleGenomeEffects(module_rs_fit)
 ```
 
-The same follow-up can also be asked against the genome phylogeny.
+If the question is directly comparative across groups, use the corresponding
+group-interaction models.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+fitModuleGroupInteractionModel(
+    x,
+    variable = "condition",
+    group = "domain",
+    genomeOffset = FALSE
+)
+```
+
+# Group 4: Phylogenetic Signal And Clade-Localized Responses
+
+These workflows are for questions where the genome tree itself is part of the
+biology.
+
+Typical biological questions are:
+
+- "Do closely related genomes respond similarly overall?"
+- "Is there a responding subtree of genomes?"
+- "For a given KO, does the response follow phylogeny?"
+- "Is there a clade where a module is consistently induced?"
+
+## Genome-level phylogenetic follow-up
+
+Start from a fitted genome-level model, then ask whether those genome responses
+show global phylogenetic structure.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+fitGenomePhylogeneticSignal(genome_fit, x, nPerm = 99)
+```
+
+If the pattern looks local rather than global, scan the tree for clades with
+shifted mean responses.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+scanGenomeClades(genome_fit, x, nPerm = 99, minTips = 2)
+```
+
+If the question is instead "what is the average genome response after
+accounting for phylogenetic covariance?", use the Brownian GLS follow-up.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+fitGenomePhylogeneticGLS(genome_fit, x)
+```
+
+## KO-level phylogenetic follow-up
+
+The same logic applies to genome-specific KO responses from the random-slope
+model.
+
+```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
+fitKOPhylogeneticSignal(ko_rs_fit, x, nPerm = 99, minGenomes = 3)
+scanKOClades(ko_rs_fit, x, nPerm = 99, minTips = 2, minGenomes = 3)
+fitKOPhylogeneticGLS(ko_rs_fit, x)
+```
+
+These are useful for questions such as:
+
+- "Do closely related genomes regulate this KO similarly?"
+- "Is there a responding subtree in which this KO is consistently induced?"
+- "What is the average KO response after phylogenetic correction?"
+
+## Module and pathway phylogenetic follow-up
+
+The same phylogenetic follow-up can be applied to module and pathway
+random-slope fits.
 
 ```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
 fitModulePhylogeneticSignal(module_rs_fit, x, nPerm = 99, minGenomes = 3)
@@ -517,16 +515,7 @@ scanModuleClades(module_rs_fit, x, nPerm = 99, minTips = 2, minGenomes = 3)
 fitModulePhylogeneticGLS(module_rs_fit, x)
 ```
 
-These three functions answer different questions:
-
-- `fitModulePhylogeneticSignal()` asks whether closely related genomes tend to
-  have similar module responses.
-- `scanModuleClades()` asks whether there is a subtree with a shifted module
-  response.
-- `fitModulePhylogeneticGLS()` asks for the average module response after
-  accounting for phylogenetic covariance.
-
-The same interface is available for pathways:
+The pathway interface is analogous:
 
 ```{r, eval = requireNamespace("glmmTMB", quietly = TRUE)}
 fitPathwayPhylogeneticSignal(pathway_rs_fit, x, nPerm = 99, minGenomes = 3)
@@ -550,22 +539,19 @@ intermediate data easy to inspect and reuse in custom workflows.
 
 # Summary
 
-The same `MTTKExperiment` can support several distinct biological questions:
+The same `MTTKExperiment` can support several distinct biological questions,
+but those questions fall into a small number of practical analysis themes:
 
-- which genes change,
-- which genomes respond,
-- which KOs respond across genomes,
-- whether KO responses vary among genomes,
-- whether clades differ in KO behavior,
-- whether higher-level functions show coherent KO responses,
-- whether total module/pathway activity shifts,
-- whether higher-level functional responses vary among genomes.
-- whether genome, KO, module, or pathway responses follow the genome
-  phylogeny globally, locally, or in a phylogenetically corrected mean sense.
+- direct shifts in genes or genomes,
+- shared functional responses across genomes,
+- heterogeneous responses across genomes or clades,
+- and phylogeny-aware response patterns.
 
-The key is to pick the workflow that matches the question:
+The key is to pick the workflow that matches the biological question rather
+than only the data level. In particular:
 
-- use KO/meta-analysis workflows for coherent function-level synthesis,
-- use re-aggregated count models for total activity,
-- use random-slope models when genome-specific heterogeneity is part of the
-  biological signal rather than noise to average away.
+- use gene/genome models when you care about the measured entities directly,
+- use KO/module/pathway models when you care about function,
+- use random-slope or group-interaction models when you expect heterogeneity,
+- and use tree-based follow-up when the genome phylogeny is part of the
+  hypothesis itself.

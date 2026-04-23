@@ -1,0 +1,643 @@
+---
+title: "How MTTK Models Work"
+author: "MTTK authors"
+package: MTTK
+output:
+    rmarkdown::html_vignette:
+        toc: true
+vignette: >
+    %\VignetteIndexEntry{How MTTK Models Work}
+    %\VignetteEngine{knitr::rmarkdown}
+    %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+library(MTTK)
+```
+
+# Overview
+
+This vignette explains the mathematics behind the main MTTK workflows in
+non-technical language.
+
+The goal is not to turn every user into a statistician. The goal is to make it
+clear:
+
+- why MTTK uses count models rather than simple linear models,
+- why genomes often appear as random effects,
+- what the offsets are doing,
+- how KO/module/pathway analyses differ from each other,
+- and how phylogeny enters the picture.
+
+Throughout, the main idea is that metatranscriptomic data are structured.
+Genes sit inside genomes, genomes sit inside communities, and the same function
+can appear in multiple genomes.
+
+# Why not use a simple linear model?
+
+The assays modeled by MTTK are counts. Counts have two features that matter:
+
+1. they are non-negative,
+2. their variance usually grows with the mean.
+
+If a gene has expected count 5 in one setting and 500 in another, the spread of
+the observations is usually much larger at 500 than at 5. A plain Gaussian
+linear model does not describe that well.
+
+## Why negative binomial?
+
+MTTK mainly uses a negative-binomial model for counts:
+
+$$
+Y \sim \text{NB}(\mu, \phi)
+$$
+
+where:
+
+- $Y$ is the observed count,
+- $\mu$ is the expected count,
+- $\phi$ is a dispersion parameter.
+
+The key practical feature is that the variance can be larger than the mean:
+
+$$
+\mathrm{Var}(Y) = \mu + \frac{\mu^2}{\phi}
+$$
+
+This is useful because metatranscriptomic counts are usually more variable than
+the Poisson model would allow.
+
+In plain language:
+
+- Poisson says "the mean more or less determines the variance".
+- Negative binomial says "the variance can be larger, and we estimate how much
+  larger".
+
+That is why MTTK uses negative-binomial models as its main count-modeling
+workhorse.
+
+## Why use a log link?
+
+MTTK models expected counts on the log scale:
+
+$$
+\log(\mu) = \eta
+$$
+
+where $\eta$ is a linear predictor containing covariates, offsets, and random
+effects.
+
+This is convenient because:
+
+- predicted counts stay positive,
+- additive effects on the log scale become multiplicative effects on the
+  original count scale.
+
+For example, if a condition coefficient is $0.69$, then the expected count is
+about $e^{0.69} \approx 2$ times larger.
+
+# Why do offsets appear in so many models?
+
+An offset is a term that is included with coefficient fixed to 1. It adjusts
+the scale of the expected count without being treated as an unknown effect to
+estimate.
+
+## Library-size offset
+
+When MTTK includes library normalization, the model contains:
+
+$$
+\log(\mu) = \ldots + \log(\text{lib\_size})
+$$
+
+Equivalently,
+
+$$
+\mu = \text{lib\_size} \times e^{\text{other terms}}
+$$
+
+This means the model compares counts after accounting for the fact that some
+samples simply have more total sequencing depth than others.
+
+## Genome-abundance offset
+
+In genome-resolved metatranscriptomics, gene RNA can be influenced by how
+abundant the parent genome is in the sample. MTTK can therefore also include:
+
+$$
+\log(\mu) = \ldots + \log(\text{genome\_abundance} + c)
+$$
+
+where $c$ is a small pseudocount.
+
+This is useful when the biological question is not only:
+
+- "is this RNA count larger?"
+
+but more specifically:
+
+- "is this RNA count larger than expected given how abundant the parent genome
+  is?"
+
+In other words, the genome-abundance offset shifts the interpretation from
+total transcription to something closer to activity relative to genome
+abundance.
+
+# Why mixed models?
+
+Many MTTK workflows use mixed models rather than ordinary generalized linear
+models.
+
+The reason is nesting. If the same KO is observed in multiple genomes, those
+KO-by-genome observations are not fully independent. Genomes can differ in
+their baseline expression, and sometimes also in how strongly they respond to a
+condition.
+
+A mixed model handles that by combining:
+
+- **fixed effects**, which are the systematic effects we want to interpret,
+- **random effects**, which describe structured variation across genomes or
+  sample blocks.
+
+In a simple random-intercept model:
+
+$$
+\log(\mu_{ij}) = \beta_0 + \beta_1 x_j + b_i + \text{offsets}
+$$
+
+where:
+
+- $i$ indexes genomes,
+- $j$ indexes samples,
+- $x_j$ is a sample-level variable such as treatment or oxygen,
+- $\beta_0$ is the overall intercept,
+- $\beta_1$ is the overall effect of interest,
+- $b_i$ is the genome-specific deviation.
+
+The random effects are usually assumed to come from a distribution such as:
+
+$$
+b_i \sim \mathcal{N}(0, \sigma_b^2)
+$$
+
+That says genomes can differ, but those differences are centered around zero
+and have an estimated amount of spread.
+
+# The main MTTK model families
+
+Rather than explain every function name separately, it is easier to explain the
+core model families and then map functions onto them.
+
+## 1. Gene-level models
+
+Used by:
+
+- `fitGeneModel()`
+
+### Biological question
+
+- Which individual genes change between groups?
+- Which genes are associated with a continuous variable such as oxygen?
+
+### Core model
+
+For gene $g$ in sample $j$:
+
+$$
+Y_{gj} \sim \text{NB}(\mu_{gj}, \phi_g)
+$$
+
+$$
+\log(\mu_{gj}) =
+\beta_{0g} + \beta_{1g} x_j
++ \log(\text{lib\_size}_j)
++ \log(\text{genome\_abundance}_{p(g),j} + c)
+$$
+
+Here:
+
+- $Y_{gj}$ is the RNA count for gene $g$ in sample $j$,
+- $x_j$ is the sample-level variable being tested,
+- $p(g)$ means "the parent genome of gene $g$".
+
+The genome enters through the optional genome-abundance offset, not as a random
+effect. That is because each gene permanently belongs to one genome, so there
+is no within-gene variation in `genome_id` to estimate as a separate random
+intercept.
+
+### Interpretation
+
+This is the most direct workflow when the inferential target is the individual
+gene.
+
+## 2. Genome-level models
+
+Used by:
+
+- `fitGenomeModel()`
+- `fitGenomeGroupMetaAnalysis()`
+
+### Biological question
+
+- Which genomes shift overall transcription?
+- Do genomes from the same clade respond coherently?
+
+### Core model
+
+For genome $i$ in sample $j$:
+
+$$
+Y_{ij} \sim \text{NB}(\mu_{ij}, \phi_i)
+$$
+
+$$
+\log(\mu_{ij}) =
+\beta_{0i} + \beta_{1i} x_j
++ \log(\text{lib\_size}_j)
++ \log(\text{genome\_abundance}_{ij} + c)
+$$
+
+This is similar to the gene-level model, but the response is already at genome
+level.
+
+### Interpretation
+
+This is useful when the question is about whole-genome behavior, not about
+which genes inside the genome are driving that behavior.
+
+## 3. KO-level mixed models
+
+Used by:
+
+- `fitKOMixedModel()`
+
+### Biological question
+
+- Which KOs respond across genomes?
+
+### Core model
+
+Let $Y_{kij}$ be the RNA count assigned to KO $k$, genome $i$, sample $j$.
+Then MTTK fits:
+
+$$
+Y_{kij} \sim \text{NB}(\mu_{kij}, \phi_k)
+$$
+
+$$
+\log(\mu_{kij}) =
+\beta_{0k} + \beta_{1k} x_j + b_{ik}
++ \log(\text{lib\_size}_j)
++ \log(\text{genome\_abundance}_{ij} + c)
+$$
+
+with
+
+$$
+b_{ik} \sim \mathcal{N}(0, \sigma_{b,k}^2)
+$$
+
+### Why this model?
+
+The same KO can occur in multiple genomes. Those KO-by-genome observations are
+related, but not identical. A random genome intercept lets each genome have
+its own baseline while still estimating one overall KO effect.
+
+### Interpretation
+
+This model asks:
+
+- after accounting for sample depth and optional genome abundance, is KO $k$
+  associated with the variable of interest across genomes?
+
+## 4. KO random-slope models
+
+Used by:
+
+- `fitKORandomSlopeModel()`
+- `koGenomeEffects()`
+
+### Biological question
+
+- Does the same KO respond differently in different genomes?
+
+### Core model
+
+$$
+Y_{kij} \sim \text{NB}(\mu_{kij}, \phi_k)
+$$
+
+$$
+\log(\mu_{kij}) =
+\beta_{0k} + \beta_{1k} x_j
++ b_{0,ik} + b_{1,ik} x_j
++ \log(\text{lib\_size}_j)
++ \log(\text{genome\_abundance}_{ij} + c)
+$$
+
+with random intercept and slope:
+
+$$
+\begin{pmatrix}
+b_{0,ik} \\
+b_{1,ik}
+\end{pmatrix}
+\sim
+\mathcal{N}
+\left(
+\begin{pmatrix}
+0 \\
+0
+\end{pmatrix},
+\Sigma_k
+\right)
+$$
+
+### Why this model?
+
+The KO-level mixed model above assumes one shared condition effect for the KO.
+The random-slope model relaxes that by allowing genome-specific KO responses.
+
+### Interpretation
+
+This model separates:
+
+- the average KO response across genomes, $\beta_{1k}$,
+- the genome-specific deviations from that average, $b_{1,ik}$.
+
+That is why `koGenomeEffects()` is a natural follow-up: it extracts the
+genome-specific conditional effects implied by the model.
+
+## 5. Direct genome-group interaction models
+
+Used by:
+
+- `fitKOGroupInteractionModel()`
+- `fitModuleGroupInteractionModel()`
+- `fitPathwayGroupInteractionModel()`
+
+### Biological question
+
+- Is the response different in Archaea versus Bacteria?
+- Does a module respond differently in one clade than another?
+
+### Core model
+
+For a two-group comparison:
+
+$$
+\log(\mu) =
+\beta_0 + \beta_1 x + \beta_2 g + \beta_3 (x \times g)
++ \text{random effects}
++ \text{offsets}
+$$
+
+where:
+
+- $x$ is the sample-level variable,
+- $g$ is a genome-group indicator such as domain,
+- $x \times g$ is the interaction term.
+
+### Interpretation
+
+The key coefficient is $\beta_3$. It answers:
+
+- does the effect of the tested variable differ between the two genome groups?
+
+This is more direct than fitting a random-slope model first and summarizing it
+later.
+
+## 6. Module/pathway meta-analysis
+
+Used by:
+
+- `fitModuleMetaAnalysis()`
+- `fitPathwayMetaAnalysis()`
+
+### Biological question
+
+- Do the KOs inside this module or pathway show a coherent direction of change?
+
+### Core idea
+
+Meta-analysis works on KO-level effect sizes and their standard errors, not on
+the raw counts.
+
+If a set contains KO estimates $\hat\beta_1, \ldots, \hat\beta_m$ with
+standard errors $s_1, \ldots, s_m$, a simple inverse-variance weighted summary
+uses weights
+
+$$
+w_r = \frac{1}{s_r^2}
+$$
+
+and combines them as
+
+$$
+\hat\beta_{\text{set}} =
+\frac{\sum_{r=1}^{m} w_r \hat\beta_r}{\sum_{r=1}^{m} w_r}
+$$
+
+### Why this model?
+
+This approach answers a different question from count re-aggregation.
+
+- Meta-analysis asks whether the KO-level effects point in a coherent
+  direction.
+- Count re-aggregation asks whether the total activity assigned to the set
+  changes.
+
+### Membership modes
+
+If a KO belongs to multiple sets:
+
+- `duplicate` counts it fully in each set,
+- `split` divides its contribution across memberships,
+- `exclusive` keeps only uniquely assigned KOs.
+
+For many-to-many annotations, `split` is often the easiest conservative option
+to explain.
+
+## 7. Module/pathway count re-aggregation models
+
+Used by:
+
+- `fitModuleMixedModel()`
+- `fitPathwayMixedModel()`
+
+### Biological question
+
+- Does total module activity change?
+- Does total pathway activity change?
+
+### Core model
+
+After aggregating counts to a module or pathway within genome and sample:
+
+$$
+Y_{fij} \sim \text{NB}(\mu_{fij}, \phi_f)
+$$
+
+$$
+\log(\mu_{fij}) =
+\beta_{0f} + \beta_{1f} x_j + b_{if}
++ \log(\text{lib\_size}_j)
++ \log(\text{genome\_abundance}_{ij} + c)
+$$
+
+Here $f$ indexes a higher-level function such as a module or pathway.
+
+### Interpretation
+
+This is the right model when the target is total assigned activity, not the
+coherence of KO-level effects.
+
+## 8. Module/pathway random-slope models
+
+Used by:
+
+- `fitModuleRandomSlopeModel()`
+- `fitPathwayRandomSlopeModel()`
+- `moduleGenomeEffects()`
+- `pathwayGenomeEffects()`
+
+### Biological question
+
+- Does the same pathway respond differently in different genomes?
+
+### Core model
+
+This is the same random-intercept/random-slope structure as the KO
+random-slope model, but applied after aggregating counts to module or pathway
+level.
+
+$$
+\log(\mu_{fij}) =
+\beta_{0f} + \beta_{1f} x_j
++ b_{0,if} + b_{1,if} x_j
++ \text{offsets}
+$$
+
+### Interpretation
+
+Use this when the biological question is about heterogeneity of whole
+functions, not just individual KOs.
+
+# Why does phylogeny matter?
+
+Two genomes that are closely related are often more similar than two distant
+genomes. If that similarity matters biologically, treating genomes as fully
+independent can be too naive.
+
+MTTK currently uses phylogeny in two main ways.
+
+## 1. Phylogenetic covariance in count models
+
+For some KO/module/pathway mixed models, MTTK can replace independent genome
+effects with Brownian phylogenetic covariance.
+
+In a Brownian model, the covariance between genome effects reflects shared
+evolutionary history:
+
+$$
+\mathbf{b} \sim \mathcal{N}(0, \sigma_b^2 \mathbf{V})
+$$
+
+where:
+
+- $\mathbf{b}$ is the vector of genome effects,
+- $\mathbf{V}$ is the phylogenetic covariance matrix derived from the tree.
+
+For random-slope models, MTTK extends this to a joint intercept-slope
+covariance structure so that both baseline activity and response strength can
+co-vary along the phylogeny.
+
+## 2. Tree-based follow-up on fitted responses
+
+Used by:
+
+- `fitGenomePhylogeneticSignal()`
+- `fitKOPhylogeneticSignal()`
+- `fitModulePhylogeneticSignal()`
+- `fitPathwayPhylogeneticSignal()`
+- `scanGenomeClades()`, `scanKOClades()`, `scanModuleClades()`,
+  `scanPathwayClades()`
+- `fitGenomePhylogeneticGLS()`, `fitKOPhylogeneticGLS()`,
+  `fitModulePhylogeneticGLS()`, `fitPathwayPhylogeneticGLS()`
+
+These functions do not refit the original count model. Instead, they work on
+the fitted responses or conditional effects.
+
+### Phylogenetic signal
+
+The intuition is:
+
+- if nearby tips in the tree have similar responses,
+- and distant tips have more different responses,
+- then the response shows phylogenetic signal.
+
+### Clade scans
+
+The intuition is:
+
+- compare one subtree against the rest of the tree,
+- ask whether that subtree has a shifted mean response.
+
+### Phylogenetic GLS
+
+The intuition is:
+
+- estimate an average response,
+- but do so while accounting for phylogenetic covariance among genomes.
+
+# Why does MTTK need so many related functions?
+
+Many of the function names look similar because they answer nearby, but not
+identical, questions.
+
+For example:
+
+- `fitKOMixedModel()` asks for one KO-level association across genomes.
+- `fitKORandomSlopeModel()` asks whether that KO behaves differently in
+  different genomes.
+- `fitModuleMetaAnalysis()` asks whether the member KOs of a module move
+  coherently.
+- `fitModuleMixedModel()` asks whether total module activity changes.
+
+That is why MTTK emphasizes question-first analysis rather than one default
+workflow for every dataset.
+
+# A short decision guide
+
+If you only remember a few rules, these are the most important ones:
+
+- Use gene/genome models when the target is the measured entity itself.
+- Use KO mixed models when the target is a function shared across genomes.
+- Use random-slope models when you expect heterogeneity among genomes.
+- Use interaction models when the main question is a direct comparison between
+  two genome groups.
+- Use meta-analysis when you want coherence of KO-level effects within a higher
+  functional set.
+- Use count re-aggregation when you want total activity of a higher-level set.
+- Use phylogeny-aware models or tree follow-up when related genomes should not
+  be treated as independent.
+
+# Summary
+
+The main mathematical ideas in MTTK are:
+
+- negative-binomial models for overdispersed counts,
+- log offsets for sequencing depth and optional genome abundance,
+- mixed models for nested gene/genome structure,
+- meta-analysis for coherent higher-level KO summaries,
+- and phylogenetic covariance or tree-based follow-up when related genomes are
+  expected to behave similarly.
+
+You do not need to remember every equation to use MTTK. But it helps to know
+what each family of models is trying to separate:
+
+- average effects,
+- genome-to-genome heterogeneity,
+- higher-level functional coherence,
+- and phylogenetic structure.
