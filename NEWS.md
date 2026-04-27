@@ -1,3 +1,13 @@
+# mttk 0.2.1
+
+## Documentation
+
+- Added Binder support: the README badge launches a browser-based RStudio
+  session with mttk and all dependencies pre-installed, so users can run
+  examples without a local R setup.
+
+---
+
 # mttk 0.2.0
 
 ## New features
