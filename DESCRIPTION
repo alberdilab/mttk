@@ -1,6 +1,6 @@
 Package: mttk
 Title: Metatranscriptomics toolkit for nested gene, genome, and community analysis
-Version: 0.1.0
+Version: 0.2.0
 Authors@R:
     person(
         given = "Antton",
@@ -23,6 +23,7 @@ Depends:
 Imports:
     ape,
     BiocParallel,
+    ggplot2,
     glmmTMB,
     methods,
     nlme,
@@ -52,6 +53,7 @@ Collate:
     'MTTKFit.R'
     'MTTKFit-meta-analysis.R'
     'MTTKFit-phylogeny.R'
+    'MTTKPlot-fit.R'
     'MTTKExperiment-analysis.R'
     'MTTKExperiment-modeling-internals.R'
     'MTTKExperiment-modeling-ko.R'

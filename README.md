@@ -154,7 +154,8 @@ Then refine the call:
 - Use `genomeCorrelation = "brownian"` where supported when related genomes
   should be correlated in the count model.
 
-If you prefer the same logic in R, use `findWorkflow()`.
+If you prefer the same logic in R, run `findWorkflow()` and answer the
+interactive prompts.
 
 - If the question is "which individual KOs are associated with the variable?",
   use `fitKOMixedModel()`.

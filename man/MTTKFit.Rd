@@ -4,7 +4,7 @@
 \alias{MTTKFit}
 \title{Construct an \code{MTTKFit}}
 \usage{
-MTTKFit(results = NULL, info = list(), models = list())
+MTTKFit(results = NULL, info = list(), models = list(), coefficients = NULL)
 }
 \arguments{
 \item{results}{A \code{S4Vectors::DataFrame}, \code{data.frame}, or \code{NULL}.}
@@ -12,6 +12,9 @@ MTTKFit(results = NULL, info = list(), models = list())
 \item{info}{A named list describing the model specification and provenance.}
 
 \item{models}{An optional named list of backend model objects.}
+
+\item{coefficients}{Optional coefficient-level table storing all fitted
+fixed-effect summaries for each modeled feature.}
 }
 \value{
 A valid \code{MTTKFit}.

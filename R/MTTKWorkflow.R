@@ -1,11 +1,12 @@
 #' Find an mttk Workflow
 #'
-#' `findWorkflow()` is a static decision helper that maps a biological
-#' question to the most relevant mttk workflow.
+#' `findWorkflow()` maps a biological question to the most relevant mttk
+#' workflow.
 #'
-#' The function is useful when you know the main unit of interest, such as
-#' genes, genomes, KOs, modules, or pathways, but want help deciding which
-#' modeling function best matches the question.
+#' The function is designed as an interactive decision tree for regular users.
+#' It steps through a small set of choices, such as the primary unit of
+#' interest and the biological question, and then recommends the most relevant
+#' mttk workflow.
 #'
 #' The recommendations are intentionally question-focused:
 #'
@@ -19,18 +20,8 @@
 #' - `clade_shift`: whether a subtree shows a shifted response
 #' - `phylogenetic_mean`: a phylogenetically corrected mean response
 #'
-#' @param level Primary unit of interest.
-#' @param goal Biological question to answer.
-#' @param variableType Type of predictor setup. Use `"categorical"` or
-#'   `"continuous"` for the simple `variable =` interface, or `"formula"` when
-#'   the model should adjust for additional covariates and test one focal term.
-#' @param repeatedMeasures Logical; if `TRUE`, include a reminder that
-#'   `sampleBlock` may be needed.
-#' @param genomeOffset Logical or `NULL`. If `TRUE` or `FALSE`, include a
-#'   reminder about explicitly setting `genomeOffset`. If `NULL`, no explicit
-#'   offset recommendation is added.
-#' @param phylogeny Logical; if `TRUE`, include a reminder about
-#'   phylogeny-aware count models or tree-based follow-up where supported.
+#' @param ... Unused. `findWorkflow()` is interactive-only and does not accept
+#'   direct workflow-selection arguments.
 #'
 #' @return An object of class `MTTKWorkflowRecommendation`, containing:
 #'
@@ -38,44 +29,71 @@
 #' - `recommendations`: an `S4Vectors::DataFrame` of primary and follow-up
 #'   functions
 #' - `suggestedArguments`: a character vector of arguments to consider
+#' - `suggestedCode`: a character vector containing a ready-to-edit code
+#'   template
 #' - `notes`: a character vector of workflow-specific notes
 #'
 #' @examples
-#' findWorkflow(
-#'     level = "ko",
-#'     goal = "association",
-#'     variableType = "categorical"
-#' )
-#'
-#' findWorkflow(
-#'     level = "module",
-#'     goal = "coherent_effects",
-#'     variableType = "continuous",
-#'     phylogeny = TRUE
-#' )
+#' if (interactive()) {
+#'     findWorkflow()
+#' }
 #'
 #' @export
-findWorkflow <- function(
-    level = c("gene", "genome", "ko", "module", "pathway"),
-    goal = c(
-        "association",
-        "heterogeneity",
-        "group_difference",
-        "group_coherence",
-        "coherent_effects",
-        "total_activity",
-        "phylogenetic_signal",
-        "clade_shift",
-        "phylogenetic_mean"
-    ),
-    variableType = c("categorical", "continuous", "formula"),
+findWorkflow <- function(...) {
+    dots <- list(...)
+
+    if (length(dots) > 0L) {
+        stop(
+            "`findWorkflow()` is interactive-only and does not accept direct arguments. ",
+            "Call `findWorkflow()` with no arguments and answer the prompts.",
+            call. = FALSE
+        )
+    }
+
+    if (!interactive()) {
+        stop(
+            "`findWorkflow()` is interactive-only. ",
+            "Run it in an interactive R session and answer the prompts.",
+            call. = FALSE
+        )
+    }
+
+    selected <- .prompt_find_workflow(
+        level = NULL,
+        goal = NULL,
+        variableType = NULL,
+        repeatedMeasures = NULL,
+        genomeOffset = NULL,
+        phylogeny = NULL,
+        promptLevel = TRUE,
+        promptGoal = TRUE,
+        promptVariableType = TRUE,
+        promptRepeatedMeasures = TRUE,
+        promptGenomeOffset = TRUE,
+        promptPhylogeny = TRUE
+    )
+
+    .build_workflow_recommendation(
+        level = selected$level,
+        goal = selected$goal,
+        variableType = selected$variableType,
+        repeatedMeasures = selected$repeatedMeasures,
+        genomeOffset = selected$genomeOffset,
+        phylogeny = selected$phylogeny
+    )
+}
+
+.build_workflow_recommendation <- function(
+    level,
+    goal,
+    variableType,
     repeatedMeasures = FALSE,
     genomeOffset = NULL,
     phylogeny = FALSE
 ) {
-    level <- match.arg(level)
-    goal <- match.arg(goal)
-    variableType <- match.arg(variableType)
+    level <- .match_workflow_choice(level, .workflow_levels(), "level")
+    goal <- .match_workflow_choice(goal, .workflow_goals(), "goal")
+    variableType <- .match_workflow_choice(variableType, .workflow_variable_types(), "variableType")
 
     if (!is.logical(repeatedMeasures) || length(repeatedMeasures) != 1L || is.na(repeatedMeasures)) {
         stop("'repeatedMeasures' must be TRUE or FALSE.", call. = FALSE)
@@ -105,15 +123,725 @@ findWorkflow <- function(
         goal = goal,
         phylogeny = phylogeny
     )))
+    suggested_code <- .workflow_code_template(
+        level = level,
+        goal = goal,
+        variableType = variableType,
+        repeatedMeasures = repeatedMeasures,
+        genomeOffset = genomeOffset,
+        phylogeny = phylogeny
+    )
 
     out <- list(
         question = recommendation$question,
         recommendations = recommendation$recommendations,
         suggestedArguments = suggested_arguments,
+        suggestedCode = suggested_code,
         notes = notes
     )
     class(out) <- c("MTTKWorkflowRecommendation", "list")
     out
+}
+
+.workflow_predictor_args <- function(variableType) {
+    switch(variableType,
+        categorical = "variable = \"condition\"",
+        continuous = "variable = \"oxygen\"",
+        formula = c(
+            "formula = ~ condition + salinity",
+            "term = \"condition\""
+        )
+    )
+}
+
+.workflow_optional_args <- function(
+    repeatedMeasures = FALSE,
+    genomeOffset = NULL,
+    phylogenyCountModel = FALSE,
+    extraArgs = character()
+) {
+    args <- character()
+
+    if (isTRUE(repeatedMeasures)) {
+        args <- c(args, "sampleBlock = \"station_id\"")
+    }
+
+    if (!is.null(genomeOffset)) {
+        args <- c(args, paste0("genomeOffset = ", genomeOffset))
+    }
+
+    if (isTRUE(phylogenyCountModel)) {
+        args <- c(args, "genomeCorrelation = \"brownian\"")
+    }
+
+    c(args, extraArgs)
+}
+
+.workflow_call_lines <- function(assignTo, fun, positionalArgs, namedArgs = character()) {
+    args <- c(positionalArgs, namedArgs)
+    lines <- paste0("    ", args)
+
+    if (length(lines) > 1L) {
+        lines[-length(lines)] <- paste0(lines[-length(lines)], ",")
+    }
+
+    c(
+        paste0(assignTo, " <- ", fun, "("),
+        lines,
+        ")"
+    )
+}
+
+.workflow_code_template <- function(
+    level,
+    goal,
+    variableType,
+    repeatedMeasures,
+    genomeOffset,
+    phylogeny
+) {
+    predictor_args <- .workflow_predictor_args(variableType)
+    count_phylogeny <- isTRUE(phylogeny) && .workflow_supports_phylo_count_model(level, goal)
+    model_args <- c(
+        predictor_args,
+        .workflow_optional_args(
+            repeatedMeasures = repeatedMeasures,
+            genomeOffset = genomeOffset,
+            phylogenyCountModel = count_phylogeny
+        )
+    )
+
+    if (identical(level, "gene") && identical(goal, "association")) {
+        return(.workflow_call_lines("gene_fit", "fitGeneModel", "x", model_args))
+    }
+
+    if (identical(level, "genome")) {
+        if (identical(goal, "association")) {
+            return(.workflow_call_lines("genome_fit", "fitGenomeModel", "x", model_args))
+        }
+
+        if (identical(goal, "group_coherence")) {
+            return(c(
+                .workflow_call_lines("genome_fit", "fitGenomeModel", "x", model_args),
+                "",
+                .workflow_call_lines(
+                    "genome_group_fit",
+                    "fitGenomeGroupMetaAnalysis",
+                    c("genome_fit", "x"),
+                    "group = \"domain\""
+                )
+            ))
+        }
+
+        if (identical(goal, "phylogenetic_signal")) {
+            return(c(
+                .workflow_call_lines("genome_fit", "fitGenomeModel", "x", model_args),
+                "",
+                .workflow_call_lines(
+                    "genome_signal_fit",
+                    "fitGenomePhylogeneticSignal",
+                    c("genome_fit", "x")
+                )
+            ))
+        }
+
+        if (identical(goal, "clade_shift")) {
+            return(c(
+                .workflow_call_lines("genome_fit", "fitGenomeModel", "x", model_args),
+                "",
+                .workflow_call_lines(
+                    "genome_clade_fit",
+                    "scanGenomeClades",
+                    c("genome_fit", "x")
+                )
+            ))
+        }
+
+        if (identical(goal, "phylogenetic_mean")) {
+            return(c(
+                .workflow_call_lines("genome_fit", "fitGenomeModel", "x", model_args),
+                "",
+                .workflow_call_lines(
+                    "genome_gls_fit",
+                    "fitGenomePhylogeneticGLS",
+                    c("genome_fit", "x")
+                )
+            ))
+        }
+    }
+
+    if (identical(level, "ko")) {
+        if (identical(goal, "association")) {
+            return(.workflow_call_lines("ko_fit", "fitKOMixedModel", "x", model_args))
+        }
+
+        if (identical(goal, "heterogeneity")) {
+            return(c(
+                .workflow_call_lines("ko_fit", "fitKORandomSlopeModel", "x", model_args),
+                "",
+                "ko_effects <- koGenomeEffects(ko_fit)"
+            ))
+        }
+
+        if (identical(goal, "group_difference")) {
+            return(.workflow_call_lines(
+                "ko_fit",
+                "fitKOGroupInteractionModel",
+                "x",
+                c(model_args, "group = \"domain\"")
+            ))
+        }
+
+        if (identical(goal, "group_coherence")) {
+            return(c(
+                .workflow_call_lines("ko_fit", "fitKORandomSlopeModel", "x", model_args),
+                "",
+                .workflow_call_lines(
+                    "ko_group_fit",
+                    "fitKOGenomeGroupMetaAnalysis",
+                    c("ko_fit", "x"),
+                    "group = \"domain\""
+                )
+            ))
+        }
+
+        if (identical(goal, "phylogenetic_signal")) {
+            return(c(
+                .workflow_call_lines("ko_fit", "fitKORandomSlopeModel", "x", model_args),
+                "",
+                .workflow_call_lines(
+                    "ko_signal_fit",
+                    "fitKOPhylogeneticSignal",
+                    c("ko_fit", "x")
+                )
+            ))
+        }
+
+        if (identical(goal, "clade_shift")) {
+            return(c(
+                .workflow_call_lines("ko_fit", "fitKORandomSlopeModel", "x", model_args),
+                "",
+                .workflow_call_lines(
+                    "ko_clade_fit",
+                    "scanKOClades",
+                    c("ko_fit", "x")
+                )
+            ))
+        }
+
+        if (identical(goal, "phylogenetic_mean")) {
+            return(c(
+                .workflow_call_lines("ko_fit", "fitKORandomSlopeModel", "x", model_args),
+                "",
+                .workflow_call_lines(
+                    "ko_gls_fit",
+                    "fitKOPhylogeneticGLS",
+                    c("ko_fit", "x")
+                )
+            ))
+        }
+    }
+
+    if (identical(level, "module")) {
+        if (identical(goal, "coherent_effects")) {
+            return(c(
+                .workflow_call_lines("ko_fit", "fitKOMixedModel", "x", model_args),
+                "",
+                .workflow_call_lines(
+                    "module_fit",
+                    "fitModuleMetaAnalysis",
+                    c("ko_fit", "x"),
+                    "membershipMode = \"split\""
+                )
+            ))
+        }
+
+        if (identical(goal, "total_activity")) {
+            return(.workflow_call_lines(
+                "module_fit",
+                "fitModuleMixedModel",
+                "x",
+                c(model_args, "membershipMode = \"duplicate\"")
+            ))
+        }
+
+        if (identical(goal, "heterogeneity")) {
+            return(c(
+                .workflow_call_lines("module_fit", "fitModuleRandomSlopeModel", "x", model_args),
+                "",
+                "module_effects <- moduleGenomeEffects(module_fit)"
+            ))
+        }
+
+        if (identical(goal, "group_difference")) {
+            return(.workflow_call_lines(
+                "module_fit",
+                "fitModuleGroupInteractionModel",
+                "x",
+                c(model_args, "group = \"domain\"")
+            ))
+        }
+
+        if (identical(goal, "phylogenetic_signal")) {
+            return(c(
+                .workflow_call_lines("module_fit", "fitModuleRandomSlopeModel", "x", model_args),
+                "",
+                .workflow_call_lines(
+                    "module_signal_fit",
+                    "fitModulePhylogeneticSignal",
+                    c("module_fit", "x")
+                )
+            ))
+        }
+
+        if (identical(goal, "clade_shift")) {
+            return(c(
+                .workflow_call_lines("module_fit", "fitModuleRandomSlopeModel", "x", model_args),
+                "",
+                .workflow_call_lines(
+                    "module_clade_fit",
+                    "scanModuleClades",
+                    c("module_fit", "x")
+                )
+            ))
+        }
+
+        if (identical(goal, "phylogenetic_mean")) {
+            return(c(
+                .workflow_call_lines("module_fit", "fitModuleRandomSlopeModel", "x", model_args),
+                "",
+                .workflow_call_lines(
+                    "module_gls_fit",
+                    "fitModulePhylogeneticGLS",
+                    c("module_fit", "x")
+                )
+            ))
+        }
+    }
+
+    if (identical(level, "pathway")) {
+        if (identical(goal, "coherent_effects")) {
+            return(c(
+                .workflow_call_lines("ko_fit", "fitKOMixedModel", "x", model_args),
+                "",
+                .workflow_call_lines(
+                    "pathway_fit",
+                    "fitPathwayMetaAnalysis",
+                    c("ko_fit", "x"),
+                    "membershipMode = \"split\""
+                )
+            ))
+        }
+
+        if (identical(goal, "total_activity")) {
+            return(.workflow_call_lines(
+                "pathway_fit",
+                "fitPathwayMixedModel",
+                "x",
+                c(model_args, "membershipMode = \"duplicate\"")
+            ))
+        }
+
+        if (identical(goal, "heterogeneity")) {
+            return(c(
+                .workflow_call_lines("pathway_fit", "fitPathwayRandomSlopeModel", "x", model_args),
+                "",
+                "pathway_effects <- pathwayGenomeEffects(pathway_fit)"
+            ))
+        }
+
+        if (identical(goal, "group_difference")) {
+            return(.workflow_call_lines(
+                "pathway_fit",
+                "fitPathwayGroupInteractionModel",
+                "x",
+                c(model_args, "group = \"domain\"")
+            ))
+        }
+
+        if (identical(goal, "phylogenetic_signal")) {
+            return(c(
+                .workflow_call_lines("pathway_fit", "fitPathwayRandomSlopeModel", "x", model_args),
+                "",
+                .workflow_call_lines(
+                    "pathway_signal_fit",
+                    "fitPathwayPhylogeneticSignal",
+                    c("pathway_fit", "x")
+                )
+            ))
+        }
+
+        if (identical(goal, "clade_shift")) {
+            return(c(
+                .workflow_call_lines("pathway_fit", "fitPathwayRandomSlopeModel", "x", model_args),
+                "",
+                .workflow_call_lines(
+                    "pathway_clade_fit",
+                    "scanPathwayClades",
+                    c("pathway_fit", "x")
+                )
+            ))
+        }
+
+        if (identical(goal, "phylogenetic_mean")) {
+            return(c(
+                .workflow_call_lines("pathway_fit", "fitPathwayRandomSlopeModel", "x", model_args),
+                "",
+                .workflow_call_lines(
+                    "pathway_gls_fit",
+                    "fitPathwayPhylogeneticGLS",
+                    c("pathway_fit", "x")
+                )
+            ))
+        }
+    }
+
+    character()
+}
+
+.workflow_levels <- function() {
+    c("gene", "genome", "ko", "module", "pathway")
+}
+
+.workflow_goals <- function() {
+    c(
+        "association",
+        "heterogeneity",
+        "group_difference",
+        "group_coherence",
+        "coherent_effects",
+        "total_activity",
+        "phylogenetic_signal",
+        "clade_shift",
+        "phylogenetic_mean"
+    )
+}
+
+.workflow_variable_types <- function() {
+    c("categorical", "continuous", "formula")
+}
+
+.match_workflow_choice <- function(value, choices, arg) {
+    if (!is.character(value) || length(value) != 1L || is.na(value) || value == "") {
+        stop("'", arg, "' must be a single non-empty character value.", call. = FALSE)
+    }
+
+    if (!(value %in% choices)) {
+        stop(
+            "'",
+            arg,
+            "' must be one of: ",
+            paste(shQuote(choices), collapse = ", "),
+            ".",
+            call. = FALSE
+        )
+    }
+
+    value
+}
+
+.workflow_level_labels <- function() {
+    c(
+        gene = paste(
+            "Gene: individual genes as the unit of inference",
+            "  Example: which transporters or stress-response genes change between treatments?",
+            sep = "\n"
+        ),
+        genome = paste(
+            "Genome: whole-genome responses",
+            "  Example: which MAGs shift their overall transcription across an oxygen gradient?",
+            sep = "\n"
+        ),
+        ko = paste(
+            "KO: shared functions across genomes",
+            "  Example: which KOs respond across the community, regardless of which genome encodes them?",
+            sep = "\n"
+        ),
+        module = paste(
+            "Module: higher functional groups built from KOs",
+            "  Example: do methanogenesis modules show a coordinated response?",
+            sep = "\n"
+        ),
+        pathway = paste(
+            "Pathway: broader functional pathways built from KOs",
+            "  Example: does the total RNA assigned to sulfur metabolism pathways change?",
+            sep = "\n"
+        )
+    )
+}
+
+.workflow_goal_labels <- function(level) {
+    labels <- c(
+        association = paste(
+            "Overall association or condition effect",
+            "  Example: which genes, genomes, or KOs increase in the treatment group?",
+            sep = "\n"
+        ),
+        heterogeneity = paste(
+            "Different responses across genomes",
+            "  Example: does the same KO increase in some genomes but decrease in others?",
+            sep = "\n"
+        ),
+        group_difference = paste(
+            "Direct difference between genome groups",
+            "  Example: does a KO respond differently in Archaea versus Bacteria?",
+            sep = "\n"
+        ),
+        group_coherence = paste(
+            "Coherent responses within genome groups",
+            "  Example: do genomes from the same clade show a consistent overall response?",
+            sep = "\n"
+        ),
+        coherent_effects = paste(
+            "Coherent KO-level effects within the higher functional category",
+            "  Example: do the KOs assigned to a pathway all point in the same direction of change?",
+            sep = "\n"
+        ),
+        total_activity = paste(
+            "Total RNA assigned to the higher functional category",
+            "  Example: does the total activity of a module increase, regardless of KO-level agreement?",
+            sep = "\n"
+        ),
+        phylogenetic_signal = paste(
+            "Global phylogenetic signal in fitted responses",
+            "  Example: do closely related genomes tend to respond similarly?",
+            sep = "\n"
+        ),
+        clade_shift = paste(
+            "A shifted response in a subtree or clade",
+            "  Example: is there one branch of the tree with unusually strong KO responses?",
+            sep = "\n"
+        ),
+        phylogenetic_mean = paste(
+            "A phylogenetically corrected mean response",
+            "  Example: what is the average response after accounting for shared ancestry?",
+            sep = "\n"
+        )
+    )
+
+    labels[.workflow_supported_goals(level)]
+}
+
+.workflow_variable_type_labels <- function() {
+    c(
+        categorical = paste(
+            "Categorical variable, such as condition or treatment",
+            "  Example: control versus warmed sediment",
+            sep = "\n"
+        ),
+        continuous = paste(
+            "Continuous variable, such as pH, salinity, or oxygen",
+            "  Example: dissolved oxygen concentration across samples",
+            sep = "\n"
+        ),
+        formula = paste(
+            "Formula with additional covariates and one focal term",
+            "  Example: test condition while adjusting for salinity and batch",
+            sep = "\n"
+        )
+    )
+}
+
+.workflow_supported_goals <- function(level) {
+    level <- .match_workflow_choice(level, .workflow_levels(), "level")
+
+    switch(level,
+        gene = "association",
+        genome = c(
+            "association",
+            "group_coherence",
+            "phylogenetic_signal",
+            "clade_shift",
+            "phylogenetic_mean"
+        ),
+        ko = c(
+            "association",
+            "heterogeneity",
+            "group_difference",
+            "group_coherence",
+            "phylogenetic_signal",
+            "clade_shift",
+            "phylogenetic_mean"
+        ),
+        module = c(
+            "coherent_effects",
+            "total_activity",
+            "heterogeneity",
+            "group_difference",
+            "phylogenetic_signal",
+            "clade_shift",
+            "phylogenetic_mean"
+        ),
+        pathway = c(
+            "coherent_effects",
+            "total_activity",
+            "heterogeneity",
+            "group_difference",
+            "phylogenetic_signal",
+            "clade_shift",
+            "phylogenetic_mean"
+        )
+    )
+}
+
+.workflow_supports_phylo_count_model <- function(level, goal) {
+    level %in% c("ko", "module", "pathway") &&
+        goal %in% c("association", "heterogeneity", "group_difference", "total_activity")
+}
+
+.workflow_menu <- function(title, values, labels, menuFun = utils::menu) {
+    choice <- menuFun(labels, title = title)
+
+    if (!is.numeric(choice) || length(choice) != 1L || is.na(choice) || choice < 1L || choice > length(values)) {
+        stop("Workflow selection cancelled.", call. = FALSE)
+    }
+
+    values[[choice]]
+}
+
+.workflow_prompt_logical <- function(title, trueLabel, falseLabel, menuFun = utils::menu) {
+    .workflow_menu(
+        title = title,
+        values = list(FALSE, TRUE),
+        labels = c(falseLabel, trueLabel),
+        menuFun = menuFun
+    )
+}
+
+.workflow_prompt_genome_offset <- function(menuFun = utils::menu) {
+    .workflow_menu(
+        title = paste(
+            "Should the model include genome-abundance normalization",
+            "through `genomeOffset`?"
+        ),
+        values = list(NULL, TRUE, FALSE),
+        labels = c(
+            paste(
+                "Automatic: decide from the assays available in the object",
+                "  Example: use this when you want the function to follow the experiment structure by default",
+                sep = "\n"
+            ),
+            paste(
+                "Yes: include genome-abundance normalization",
+                "  Example: adjust KO or gene RNA for parent-genome abundance",
+                sep = "\n"
+            ),
+            paste(
+                "No: do not include genome-abundance normalization",
+                "  Example: focus on RNA differences without abundance normalization",
+                sep = "\n"
+            )
+        ),
+        menuFun = menuFun
+    )
+}
+
+.prompt_find_workflow <- function(
+    level,
+    goal,
+    variableType,
+    repeatedMeasures,
+    genomeOffset,
+    phylogeny,
+    promptLevel,
+    promptGoal,
+    promptVariableType,
+    promptRepeatedMeasures,
+    promptGenomeOffset,
+    promptPhylogeny,
+    menuFun = utils::menu
+) {
+    if (!promptLevel && !is.null(level)) {
+        level <- .match_workflow_choice(level, .workflow_levels(), "level")
+    }
+
+    if (isTRUE(promptLevel)) {
+        level <- .workflow_menu(
+            title = "What is your primary unit of interest?",
+            values = as.list(.workflow_levels()),
+            labels = unname(.workflow_level_labels()),
+            menuFun = menuFun
+        )
+    }
+
+    supported_goals <- .workflow_supported_goals(level)
+
+    if (!promptGoal && !is.null(goal)) {
+        goal <- .match_workflow_choice(goal, supported_goals, "goal")
+    }
+
+    if (isTRUE(promptGoal)) {
+        goal <- .workflow_menu(
+            title = "What biological question are you trying to answer?",
+            values = as.list(supported_goals),
+            labels = unname(.workflow_goal_labels(level)),
+            menuFun = menuFun
+        )
+    }
+
+    if (!promptVariableType && !is.null(variableType)) {
+        variableType <- .match_workflow_choice(variableType, .workflow_variable_types(), "variableType")
+    }
+
+    if (isTRUE(promptVariableType)) {
+        variableType <- .workflow_menu(
+            title = "What type of predictor or model specification do you have?",
+            values = as.list(.workflow_variable_types()),
+            labels = unname(.workflow_variable_type_labels()),
+            menuFun = menuFun
+        )
+    }
+
+    if (isTRUE(promptRepeatedMeasures)) {
+        repeatedMeasures <- .workflow_prompt_logical(
+            title = "Do you need repeated-measures or blocked-sample support?",
+            trueLabel = paste(
+                "Yes: include a reminder about `sampleBlock`",
+                "  Example: paired samples, time series, or several measurements from the same site",
+                sep = "\n"
+            ),
+            falseLabel = paste(
+                "No: no repeated-measures or sample block",
+                "  Example: each sample is an independent observation",
+                sep = "\n"
+            ),
+            menuFun = menuFun
+        )
+    }
+
+    if (isTRUE(promptGenomeOffset)) {
+        genomeOffset <- .workflow_prompt_genome_offset(menuFun = menuFun)
+    }
+
+    if (isTRUE(promptPhylogeny)) {
+        phylogeny <- if (.workflow_supports_phylo_count_model(level, goal)) {
+            .workflow_prompt_logical(
+                title = "Should the count model account for phylogenetic non-independence among genomes?",
+                trueLabel = paste(
+                    "Yes: suggest `genomeCorrelation = \"brownian\"` when supported",
+                    "  Example: closely related genomes are expected to have similar baseline activity or responses",
+                    sep = "\n"
+                ),
+                falseLabel = paste(
+                    "No: use independent genome effects",
+                    "  Example: genome relatedness is not part of the current biological question",
+                    sep = "\n"
+                ),
+                menuFun = menuFun
+            )
+        } else {
+            FALSE
+        }
+    }
+
+    list(
+        level = level,
+        goal = goal,
+        variableType = variableType,
+        repeatedMeasures = repeatedMeasures,
+        genomeOffset = genomeOffset,
+        phylogeny = phylogeny
+    )
 }
 
 .recommend_mttk_workflow <- function(level, goal) {
@@ -505,6 +1233,13 @@ print.MTTKWorkflowRecommendation <- function(x, ...) {
         cat("\nSuggested arguments:\n")
         for (one_arg in x$suggestedArguments) {
             cat("- ", one_arg, "\n", sep = "")
+        }
+    }
+
+    if (!is.null(x$suggestedCode) && length(x$suggestedCode) > 0L) {
+        cat("\nSuggested code:\n")
+        for (one_line in x$suggestedCode) {
+            cat(one_line, "\n", sep = "")
         }
     }
 

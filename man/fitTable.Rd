@@ -4,13 +4,25 @@
 \alias{fitTable}
 \title{Extract a Sorted Fit Result Table}
 \usage{
-fitTable(x, status = NULL, sortBy = NULL, decreasing = NULL, n = NULL)
+fitTable(
+  x,
+  status = NULL,
+  term = NULL,
+  sortBy = NULL,
+  decreasing = NULL,
+  n = NULL
+)
 }
 \arguments{
 \item{x}{An \code{MTTKFit}.}
 
 \item{status}{Optional character vector of fit statuses to keep, such as
 \code{"ok"} or \code{c("ok", "skipped")}. Use \code{NULL} to keep all rows.}
+
+\item{term}{Optional fitted model term to report instead of the canonical
+focal term stored in the fit. This requires stored coefficient summaries
+and can be useful for inspecting secondary coefficients from a multivariable
+formula fit.}
 
 \item{sortBy}{Optional sort key. This can be any result column name or the
 special value \code{"abs_estimate"}.}

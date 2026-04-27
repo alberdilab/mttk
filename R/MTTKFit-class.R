@@ -22,6 +22,10 @@
 #' - `info`: a named list describing the model specification, backend, and
 #'   provenance.
 #' - `models`: an optional named list of backend model objects.
+#' - `coefficients`: an optional coefficient-level table storing all fitted
+#'   fixed-effect summaries for each modeled feature.
+#' - `groupEffects`: optional stored conditional effects for random-slope
+#'   workflows.
 #'
 #' @name MTTKFit-class
 #' @rdname MTTKFit-class
@@ -69,6 +73,14 @@ NULL
             }
             if (!is.null(fit_state$models) && !is.list(fit_state$models)) {
                 problems <- c(problems, "'metadata(x)$mttk_fit$models' must be a list.")
+            }
+            if (!is.null(fit_state$coefficients) &&
+                !methods::is(fit_state$coefficients, "DataFrame") &&
+                !is.data.frame(fit_state$coefficients)) {
+                problems <- c(
+                    problems,
+                    "'metadata(x)$mttk_fit$coefficients' must be a DataFrame or data.frame."
+                )
             }
             if (!is.null(fit_state$groupEffects) &&
                 !methods::is(fit_state$groupEffects, "DataFrame") &&

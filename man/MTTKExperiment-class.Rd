@@ -78,7 +78,7 @@ in use.
 \section{Design notes}{
 
 Only \code{MTTKExperiment} is defined at this stage. Dedicated helper classes such
-as \code{mttkHierarchy}, \code{MTTKFit}, and \code{mttkNetwork} are intentionally deferred
+as \code{MTTKHierarchy}, \code{MTTKFit}, and \code{MTTKNetwork} are intentionally deferred
 until their storage contracts are clearer.
 }
 

@@ -714,6 +714,11 @@
         return(NA_character_)
     }
 
+    stripped_term <- gsub("`", "", as.character(tested_term), fixed = TRUE)
+    if (grepl(":", stripped_term, fixed = TRUE)) {
+        return(NA_character_)
+    }
+
     variables <- names(sample_data)
     matches <- variables[vapply(
         variables,
@@ -729,6 +734,44 @@
 }
 
 .describe_tested_term <- function(sample_data, tested_term, tested_variable = NA_character_) {
+    stripped_term <- gsub("`", "", as.character(tested_term), fixed = TRUE)
+
+    if (grepl(":", stripped_term, fixed = TRUE)) {
+        interaction_parts <- strsplit(stripped_term, ":", fixed = TRUE)[[1L]]
+        interaction_variables <- unique(unlist(lapply(interaction_parts, function(one_part) {
+            variables <- names(sample_data)[vapply(
+                names(sample_data),
+                function(variable) .term_matches_variable(one_part, variable),
+                logical(1)
+            )]
+
+            if (length(variables) == 1L) {
+                variables
+            } else {
+                NA_character_
+            }
+        }), use.names = FALSE))
+        interaction_variables <- interaction_variables[!is.na(interaction_variables) & interaction_variables != ""]
+
+        effect_label <- if (length(interaction_variables) >= 2L) {
+            paste0("interaction: ", paste(interaction_variables, collapse = " x "))
+        } else {
+            paste0("interaction: ", stripped_term)
+        }
+
+        return(list(
+            variable = if (length(interaction_variables) >= 2L) {
+                paste(interaction_variables, collapse = ":")
+            } else {
+                stripped_term
+            },
+            type = "interaction",
+            referenceLevel = NA_character_,
+            contrastLevel = NA_character_,
+            effectLabel = effect_label
+        ))
+    }
+
     tested_variable <- as.character(tested_variable)
     if (!is.na(tested_variable) &&
         tested_variable %in% names(sample_data)) {
@@ -789,6 +832,51 @@
         contrastLevel = NA_character_,
         effectLabel = as.character(tested_term)
     )
+}
+
+.summarize_model_coefficients <- function(coefficient_table, model_spec, feature_id, feature_id_column) {
+    if (is.null(coefficient_table) || nrow(coefficient_table) == 0L) {
+        return(S4Vectors::DataFrame())
+    }
+
+    statistic_col <- intersect(colnames(coefficient_table), c("z value", "t value"))[1L]
+    p_value_col <- grep("^Pr\\(", colnames(coefficient_table), value = TRUE)[1L]
+    term_names <- rownames(coefficient_table)
+
+    rows <- lapply(term_names, function(one_term) {
+        term_info <- .resolved_term_info(model_spec, tested_term = one_term)
+        out <- S4Vectors::DataFrame(
+            model_term = as.character(one_term),
+            term_variable = term_info$variable,
+            term_variable_type = term_info$type,
+            term_reference_level = term_info$referenceLevel,
+            term_contrast_level = term_info$contrastLevel,
+            term_effect_label = term_info$effectLabel,
+            estimate = as.numeric(coefficient_table[one_term, "Estimate"]),
+            std_error = as.numeric(coefficient_table[one_term, "Std. Error"]),
+            statistic = if (!is.na(statistic_col)) {
+                as.numeric(coefficient_table[one_term, statistic_col])
+            } else {
+                NA_real_
+            },
+            p_value = if (!is.na(p_value_col) && nzchar(p_value_col)) {
+                as.numeric(coefficient_table[one_term, p_value_col])
+            } else {
+                NA_real_
+            },
+            row.names = paste(feature_id, one_term, sep = "::")
+        )
+        out[[feature_id_column]] <- feature_id
+        out <- out[, c(
+            feature_id_column,
+            setdiff(names(out), feature_id_column)
+        )]
+        out
+    })
+
+    out <- do.call(rbind, rows)
+    rownames(out) <- paste(rep(feature_id, length(term_names)), term_names, sep = "::")
+    out
 }
 
 .resolve_formula_random_slope <- function(sample_data, randomSlope, tested_variable, fixed_variables) {
@@ -1273,25 +1361,25 @@
     if (nrow(data) == 0L) {
         row$status <- "skipped"
         row$error_message <- paste0("No observations were available for the ", feature_label, ".")
-        return(list(result = row, model = NULL))
+        return(list(result = row, model = NULL, coefficients = S4Vectors::DataFrame()))
     }
 
     if (length(unique(as.character(data$genome_id))) < 2L) {
         row$status <- "skipped"
         row$error_message <- "At least two genomes are required to estimate the random effect."
-        return(list(result = row, model = NULL))
+        return(list(result = row, model = NULL, coefficients = S4Vectors::DataFrame()))
     }
 
     if (length(unique(as.character(data$genome_group))) < 2L) {
         row$status <- "skipped"
         row$error_message <- "At least two genome groups are required to estimate the interaction."
-        return(list(result = row, model = NULL))
+        return(list(result = row, model = NULL, coefficients = S4Vectors::DataFrame()))
     }
 
     if (all(data$rna_count == 0)) {
         row$status <- "skipped"
         row$error_message <- paste0("All ", feature_label, "-level counts were zero.")
-        return(list(result = row, model = NULL))
+        return(list(result = row, model = NULL, coefficients = S4Vectors::DataFrame()))
     }
 
     data$genome_group <- factor(as.character(data$genome_group), levels = group_spec$levels)
@@ -1335,10 +1423,16 @@
         } else {
             NA_character_
         }
-        return(list(result = row, model = NULL))
+        return(list(result = row, model = NULL, coefficients = S4Vectors::DataFrame()))
     }
 
     coefficient_table <- summary(fit)$coefficients$cond
+    all_coefficients <- .summarize_model_coefficients(
+        coefficient_table = coefficient_table,
+        model_spec = model_spec,
+        feature_id = feature_id,
+        feature_id_column = feature_id_column
+    )
     interaction_term <- tryCatch(
         .resolve_feature_group_interaction_term(
             model_spec = model_spec,
@@ -1357,7 +1451,11 @@
         } else {
             NA_character_
         }
-        return(list(result = row, model = if (keep_fits) fit else NULL))
+        return(list(
+            result = row,
+            model = if (keep_fits) fit else NULL,
+            coefficients = all_coefficients
+        ))
     }
 
     statistic_col <- intersect(colnames(coefficient_table), c("z value", "t value"))[1L]
@@ -1393,7 +1491,8 @@
 
     list(
         result = row,
-        model = if (keep_fits) fit else NULL
+        model = if (keep_fits) fit else NULL,
+        coefficients = all_coefficients
     )
 }
 
@@ -2100,22 +2199,49 @@
 
 .match_model_term_name <- function(term, candidates) {
     candidates <- as.character(candidates)
-    if (term %in% candidates) {
-        return(term)
+    stripped_candidates <- gsub("`", "", candidates, fixed = TRUE)
+    stripped_term <- gsub("`", "", as.character(term), fixed = TRUE)
+    stripped_term <- gsub("\\*", ":", stripped_term)
+
+    exact <- candidates[stripped_candidates == stripped_term]
+    if (length(exact) == 1L) {
+        return(exact[[1L]])
     }
 
-    strip_ticks <- function(x) {
-        gsub("`", "", as.character(x), fixed = TRUE)
+    if (stripped_term %in% stripped_candidates) {
+        return(candidates[match(stripped_term, stripped_candidates)][[1L]])
     }
 
-    matched <- candidates[strip_ticks(candidates) == strip_ticks(term)]
-    if (length(matched) == 1L) {
-        return(matched[[1L]])
-    }
-
-    prefix_matches <- candidates[startsWith(strip_ticks(candidates), strip_ticks(term))]
+    prefix_matches <- candidates[startsWith(stripped_candidates, stripped_term)]
     if (length(prefix_matches) == 1L) {
         return(prefix_matches[[1L]])
+    }
+
+    if (grepl(":", stripped_term, fixed = TRUE)) {
+        requested_parts <- strsplit(stripped_term, ":", fixed = TRUE)[[1L]]
+        requested_parts <- requested_parts[requested_parts != ""]
+
+        interaction_candidates <- candidates[grepl(":", stripped_candidates, fixed = TRUE)]
+        interaction_candidate_terms <- stripped_candidates[grepl(":", stripped_candidates, fixed = TRUE)]
+
+        matched_interactions <- interaction_candidates[vapply(
+            interaction_candidate_terms,
+            function(candidate) {
+                candidate_parts <- strsplit(candidate, ":", fixed = TRUE)[[1L]]
+                if (length(candidate_parts) != length(requested_parts)) {
+                    return(FALSE)
+                }
+
+                all(vapply(requested_parts, function(one_part) {
+                    any(candidate_parts == one_part | startsWith(candidate_parts, one_part))
+                }, logical(1)))
+            },
+            logical(1)
+        )]
+
+        if (length(matched_interactions) == 1L) {
+            return(matched_interactions[[1L]])
+        }
     }
 
     NA_character_
@@ -2695,19 +2821,19 @@
     if (nrow(data) == 0L) {
         row$status <- "skipped"
         row$error_message <- paste0("No observations were available for the ", feature_label, ".")
-        return(list(result = row, model = NULL))
+        return(list(result = row, model = NULL, coefficients = S4Vectors::DataFrame()))
     }
 
     if (length(unique(as.character(data$genome_id))) < 2L) {
         row$status <- "skipped"
         row$error_message <- "At least two genomes are required to estimate the random effect."
-        return(list(result = row, model = NULL))
+        return(list(result = row, model = NULL, coefficients = S4Vectors::DataFrame()))
     }
 
     if (all(data$rna_count == 0)) {
         row$status <- "skipped"
         row$error_message <- paste0("All ", feature_label, "-level counts were zero.")
-        return(list(result = row, model = NULL))
+        return(list(result = row, model = NULL, coefficients = S4Vectors::DataFrame()))
     }
     random_effect_state <- .prepare_feature_genome_random_effect(
         data = data,
@@ -2749,10 +2875,16 @@
         } else {
             NA_character_
         }
-        return(list(result = row, model = NULL))
+        return(list(result = row, model = NULL, coefficients = S4Vectors::DataFrame()))
     }
 
     coefficient_table <- summary(fit)$coefficients$cond
+    all_coefficients <- .summarize_model_coefficients(
+        coefficient_table = coefficient_table,
+        model_spec = model_spec,
+        feature_id = feature_id,
+        feature_id_column = feature_id_column
+    )
     tested_term <- tryCatch(
         .resolve_fitted_tested_term(model_spec, coefficient_table),
         error = identity
@@ -2766,7 +2898,11 @@
         } else {
             NA_character_
         }
-        return(list(result = row, model = if (keep_fits) fit else NULL))
+        return(list(
+            result = row,
+            model = if (keep_fits) fit else NULL,
+            coefficients = all_coefficients
+        ))
     }
 
     statistic_col <- intersect(colnames(coefficient_table), c("z value", "t value"))[1L]
@@ -2806,7 +2942,8 @@
 
     list(
         result = row,
-        model = if (keep_fits) fit else NULL
+        model = if (keep_fits) fit else NULL,
+        coefficients = all_coefficients
     )
 }
 
@@ -2858,19 +2995,34 @@
     if (nrow(data) == 0L) {
         row$status <- "skipped"
         row$error_message <- paste0("No observations were available for the ", feature_label, ".")
-        return(list(result = row, model = NULL, group_effects = S4Vectors::DataFrame()))
+        return(list(
+            result = row,
+            model = NULL,
+            coefficients = S4Vectors::DataFrame(),
+            group_effects = S4Vectors::DataFrame()
+        ))
     }
 
     if (length(unique(as.character(data$genome_id))) < 2L) {
         row$status <- "skipped"
         row$error_message <- "At least two genomes are required to estimate random slopes."
-        return(list(result = row, model = NULL, group_effects = S4Vectors::DataFrame()))
+        return(list(
+            result = row,
+            model = NULL,
+            coefficients = S4Vectors::DataFrame(),
+            group_effects = S4Vectors::DataFrame()
+        ))
     }
 
     if (all(data$rna_count == 0)) {
         row$status <- "skipped"
         row$error_message <- paste0("All ", feature_label, "-level counts were zero.")
-        return(list(result = row, model = NULL, group_effects = S4Vectors::DataFrame()))
+        return(list(
+            result = row,
+            model = NULL,
+            coefficients = S4Vectors::DataFrame(),
+            group_effects = S4Vectors::DataFrame()
+        ))
     }
 
     random_effect_state <- .prepare_feature_genome_random_slope_effect(
@@ -2915,7 +3067,12 @@
         } else {
             NA_character_
         }
-        return(list(result = row, model = NULL, group_effects = S4Vectors::DataFrame()))
+        return(list(
+            result = row,
+            model = NULL,
+            coefficients = S4Vectors::DataFrame(),
+            group_effects = S4Vectors::DataFrame()
+        ))
     }
 
     if (identical(random_effect_state$effectExtraction$mode, "brownian")) {
@@ -2951,6 +3108,12 @@
     }
 
     coefficient_table <- summary(fit)$coefficients$cond
+    all_coefficients <- .summarize_model_coefficients(
+        coefficient_table = coefficient_table,
+        model_spec = model_spec,
+        feature_id = feature_id,
+        feature_id_column = feature_id_column
+    )
     tested_term <- tryCatch(
         .resolve_fitted_tested_term(model_spec, coefficient_table),
         error = identity
@@ -2967,6 +3130,7 @@
         return(list(
             result = row,
             model = if (keep_fits) fit else NULL,
+            coefficients = all_coefficients,
             group_effects = S4Vectors::DataFrame()
         ))
     }
@@ -3069,6 +3233,7 @@
     list(
         result = row,
         model = if (keep_fits) fit else NULL,
+        coefficients = all_coefficients,
         group_effects = group_effects
     )
 }
@@ -3192,6 +3357,13 @@
     } else {
         list()
     }
+    stored_coefficients <- do.call(
+        rbind,
+        lapply(fitted_rows, function(one_fit) one_fit$coefficients)
+    )
+    if (is.null(stored_coefficients)) {
+        stored_coefficients <- S4Vectors::DataFrame()
+    }
 
     group_effects <- do.call(
         rbind,
@@ -3262,7 +3434,8 @@
     out <- MTTKFit(
         results = results,
         info = info,
-        models = stored_models
+        models = stored_models,
+        coefficients = stored_coefficients
     )
     metadata_list <- S4Vectors::metadata(out)
     metadata_list$mttk_fit$groupEffects <- group_effects
@@ -3444,6 +3617,13 @@
     } else {
         list()
     }
+    stored_coefficients <- do.call(
+        rbind,
+        lapply(fitted_rows, function(one_fit) one_fit$coefficients)
+    )
+    if (is.null(stored_coefficients)) {
+        stored_coefficients <- S4Vectors::DataFrame()
+    }
 
     has_sample_block <- !is.na(model_state$sampleBlock) && model_state$sampleBlock != ""
     genome_random_term <- if (identical(genome_correlation, "brownian")) {
@@ -3500,7 +3680,8 @@
     MTTKFit(
         results = results,
         info = info,
-        models = stored_models
+        models = stored_models,
+        coefficients = stored_coefficients
     )
 }
 
@@ -3636,6 +3817,13 @@
     } else {
         list()
     }
+    stored_coefficients <- do.call(
+        rbind,
+        lapply(fitted_rows, function(one_fit) one_fit$coefficients)
+    )
+    if (is.null(stored_coefficients)) {
+        stored_coefficients <- S4Vectors::DataFrame()
+    }
 
     resolved_terms <- unique(stats::na.omit(as.character(results$tested_term)))
 
@@ -3703,7 +3891,8 @@
     MTTKFit(
         results = results,
         info = info,
-        models = stored_models
+        models = stored_models,
+        coefficients = stored_coefficients
     )
 }
 

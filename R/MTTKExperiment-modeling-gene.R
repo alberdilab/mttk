@@ -170,13 +170,13 @@
     if (nrow(data) == 0L) {
         row$status <- "skipped"
         row$error_message <- "No observations were available for the gene."
-        return(list(result = row, model = NULL))
+        return(list(result = row, model = NULL, coefficients = S4Vectors::DataFrame()))
     }
 
     if (all(data$rna_count == 0)) {
         row$status <- "skipped"
         row$error_message <- "All gene-level counts were zero."
-        return(list(result = row, model = NULL))
+        return(list(result = row, model = NULL, coefficients = S4Vectors::DataFrame()))
     }
 
     warning_messages <- character()
@@ -208,10 +208,16 @@
         } else {
             NA_character_
         }
-        return(list(result = row, model = NULL))
+        return(list(result = row, model = NULL, coefficients = S4Vectors::DataFrame()))
     }
 
     coefficient_table <- summary(fit)$coefficients$cond
+    all_coefficients <- .summarize_model_coefficients(
+        coefficient_table = coefficient_table,
+        model_spec = variable_info$modelSpec,
+        feature_id = gene_id,
+        feature_id_column = "gene_id"
+    )
     tested_term <- tryCatch(
         .resolve_fitted_tested_term(variable_info$modelSpec, coefficient_table),
         error = identity
@@ -225,7 +231,11 @@
         } else {
             NA_character_
         }
-        return(list(result = row, model = if (keep_fits) fit else NULL))
+        return(list(
+            result = row,
+            model = if (keep_fits) fit else NULL,
+            coefficients = all_coefficients
+        ))
     }
 
     statistic_col <- intersect(colnames(coefficient_table), c("z value", "t value"))[1L]
@@ -265,7 +275,8 @@
 
     list(
         result = row,
-        model = if (keep_fits) fit else NULL
+        model = if (keep_fits) fit else NULL,
+        coefficients = all_coefficients
     )
 }
 
@@ -540,6 +551,13 @@ fitGeneModel <- function(
     } else {
         list()
     }
+    stored_coefficients <- do.call(
+        rbind,
+        lapply(fitted_rows, function(one_fit) one_fit$coefficients)
+    )
+    if (is.null(stored_coefficients)) {
+        stored_coefficients <- S4Vectors::DataFrame()
+    }
 
     formula <- .gene_model_formula(
         model_spec = variable_info$modelSpec,
@@ -584,6 +602,7 @@ fitGeneModel <- function(
     MTTKFit(
         results = results,
         info = info,
-        models = stored_models
+        models = stored_models,
+        coefficients = stored_coefficients
     )
 }

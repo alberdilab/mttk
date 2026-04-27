@@ -130,6 +130,172 @@ test_that("fitTable filters and sorts fit results", {
     expect_identical(rownames(top_tbl), "K00368")
 })
 
+test_that("coefTable and fitTable(term=) use stored coefficient summaries", {
+    fit <- MTTKFit(
+        results = data.frame(
+            ko_id = c("K03043", "K02111"),
+            tested_term = c("conditiontreated", "conditiontreated"),
+            estimate = c(0.5, -0.3),
+            p_value = c(0.2, 0.01),
+            q_value = c(0.2, 0.02),
+            status = c("ok", "ok"),
+            row.names = c("K03043", "K02111")
+        ),
+        info = list(
+            model = "ko_mixed_model",
+            featureIdColumn = "ko_id",
+            testedTerm = "conditiontreated"
+        ),
+        coefficients = data.frame(
+            ko_id = c("K03043", "K03043", "K02111", "K02111"),
+            model_term = c("conditiontreated", "salinity", "conditiontreated", "salinity"),
+            term_variable = c("condition", "salinity", "condition", "salinity"),
+            term_variable_type = c("two_level_factor", "numeric", "two_level_factor", "numeric"),
+            term_reference_level = c("control", NA, "control", NA),
+            term_contrast_level = c("treated", NA, "treated", NA),
+            term_effect_label = c(
+                "condition: treated vs control",
+                "salinity per unit increase",
+                "condition: treated vs control",
+                "salinity per unit increase"
+            ),
+            estimate = c(0.5, 0.1, -0.3, -0.4),
+            std_error = c(0.2, 0.05, 0.15, 0.08),
+            statistic = c(2.5, 2, -2, -5),
+            p_value = c(0.2, 0.04, 0.01, 0.001),
+            row.names = c(
+                "K03043::conditiontreated",
+                "K03043::salinity",
+                "K02111::conditiontreated",
+                "K02111::salinity"
+            )
+        )
+    )
+
+    coefficients <- coefTable(fit, term = "salinity")
+    expect_s4_class(coefficients, "DataFrame")
+    expect_identical(as.character(coefficients$model_term), c("salinity", "salinity"))
+    expect_true("q_value" %in% names(coefficients))
+
+    salinity_table <- fitTable(fit, term = "salinity", sortBy = "p_value")
+    expect_identical(rownames(salinity_table), c("K02111", "K03043"))
+    expect_true(all(as.character(salinity_table$tested_term) == "salinity"))
+    expect_equal(as.numeric(salinity_table$estimate), c(-0.4, 0.1))
+})
+
+test_that("termFits materializes one canonical fit per stored coefficient term", {
+    fit <- MTTKFit(
+        results = data.frame(
+            ko_id = c("K03043", "K02111"),
+            tested_term = c("conditiontreated", "conditiontreated"),
+            estimate = c(0.5, -0.3),
+            p_value = c(0.2, 0.01),
+            q_value = c(0.2, 0.02),
+            status = c("ok", "ok"),
+            row.names = c("K03043", "K02111")
+        ),
+        info = list(
+            model = "ko_mixed_model",
+            featureIdColumn = "ko_id",
+            testedTerm = "conditiontreated",
+            testedTermInput = "condition",
+            effectLabel = "condition: treated vs control"
+        ),
+        models = list(
+            K03043 = list(id = "m1"),
+            K02111 = list(id = "m2")
+        ),
+        coefficients = data.frame(
+            ko_id = c("K03043", "K03043", "K02111", "K02111"),
+            model_term = c("conditiontreated", "salinity", "conditiontreated", "salinity"),
+            term_variable = c("condition", "salinity", "condition", "salinity"),
+            term_variable_type = c("two_level_factor", "numeric", "two_level_factor", "numeric"),
+            term_reference_level = c("control", NA, "control", NA),
+            term_contrast_level = c("treated", NA, "treated", NA),
+            term_effect_label = c(
+                "condition: treated vs control",
+                "salinity per unit increase",
+                "condition: treated vs control",
+                "salinity per unit increase"
+            ),
+            estimate = c(0.5, 0.1, -0.3, -0.4),
+            std_error = c(0.2, 0.05, 0.15, 0.08),
+            statistic = c(2.5, 2, -2, -5),
+            p_value = c(0.2, 0.04, 0.01, 0.001),
+            row.names = c(
+                "K03043::conditiontreated",
+                "K03043::salinity",
+                "K02111::conditiontreated",
+                "K02111::salinity"
+            )
+        )
+    )
+
+    split_fits <- termFits(fit)
+    expect_identical(names(split_fits), c("conditiontreated", "salinity"))
+    expect_true(all(vapply(split_fits, methods::is, logical(1), class2 = "MTTKFit")))
+    expect_identical(fitInfo(split_fits[["salinity"]])$testedTerm, "salinity")
+    expect_identical(fitInfo(split_fits[["salinity"]])$effectLabel, "salinity per unit increase")
+    expect_true(all(as.character(split_fits[["salinity"]]$tested_term) == "salinity"))
+    expect_identical(names(modelObjects(split_fits[["salinity"]])), c("K03043", "K02111"))
+
+    selected <- termFits(fit, terms = "salinity")
+    expect_identical(names(selected), "salinity")
+})
+
+test_that("termFits only retains random-slope group effects for the original focal term", {
+    fit <- MTTKFit(
+        results = data.frame(
+            ko_id = c("K03043", "K02111"),
+            tested_term = c("conditiontreated", "conditiontreated"),
+            estimate = c(0.5, -0.3),
+            status = c("ok", "ok"),
+            row.names = c("K03043", "K02111")
+        ),
+        info = list(
+            model = "ko_random_slope_model",
+            featureIdColumn = "ko_id",
+            groupEffectColumn = "genome_id",
+            testedTerm = "conditiontreated",
+            effectLabel = "condition: treated vs control"
+        ),
+        coefficients = data.frame(
+            ko_id = c("K03043", "K03043", "K02111", "K02111"),
+            model_term = c("conditiontreated", "salinity", "conditiontreated", "salinity"),
+            term_variable = c("condition", "salinity", "condition", "salinity"),
+            term_variable_type = c("two_level_factor", "numeric", "two_level_factor", "numeric"),
+            term_effect_label = c(
+                "condition: treated vs control",
+                "salinity per unit increase",
+                "condition: treated vs control",
+                "salinity per unit increase"
+            ),
+            estimate = c(0.5, 0.1, -0.3, -0.4),
+            std_error = c(0.2, 0.05, 0.15, 0.08),
+            p_value = c(0.2, 0.04, 0.01, 0.001),
+            row.names = c(
+                "K03043::conditiontreated",
+                "K03043::salinity",
+                "K02111::conditiontreated",
+                "K02111::salinity"
+            )
+        )
+    )
+
+    fit_metadata <- S4Vectors::metadata(fit)
+    fit_metadata$mttk_fit$groupEffects <- S4Vectors::DataFrame(
+        ko_id = c("K03043", "K02111"),
+        genome_id = c("genome_1", "genome_1"),
+        conditional_effect_estimate = c(0.6, -0.2),
+        row.names = c("K03043::genome_1", "K02111::genome_1")
+    )
+    S4Vectors::metadata(fit) <- fit_metadata
+
+    split_fits <- termFits(fit)
+    expect_false(is.null(S4Vectors::metadata(split_fits[["conditiontreated"]])$mttk_fit$groupEffects))
+    expect_true(is.null(S4Vectors::metadata(split_fits[["salinity"]])$mttk_fit$groupEffects))
+})
+
 test_that("significantResults returns an MTTKFit subset", {
     fit <- make_test_fit()
 

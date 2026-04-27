@@ -30,6 +30,10 @@ contain:
 \item \code{info}: a named list describing the model specification, backend, and
 provenance.
 \item \code{models}: an optional named list of backend model objects.
+\item \code{coefficients}: an optional coefficient-level table storing all fitted
+fixed-effect summaries for each modeled feature.
+\item \code{groupEffects}: optional stored conditional effects for random-slope
+workflows.
 }
 }
 

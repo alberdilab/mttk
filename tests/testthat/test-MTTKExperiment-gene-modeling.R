@@ -108,6 +108,50 @@ test_that("gene-level workflows support formulas with explicit tested terms", {
     expect_match(fitInfo(fit)$fixedEffectsFormula, "pH")
 })
 
+test_that("gene-level workflows accept simplified interaction terms and store all coefficients", {
+    skip_if_not_installed("glmmTMB")
+
+    x <- makeShowcaseMTTKExperiment()
+    fit <- fitGeneModel(
+        x,
+        formula = ~ condition * salinity,
+        term = "condition:salinity",
+        genomeOffset = FALSE
+    )
+
+    expect_s4_class(fit, "MTTKFit")
+    expect_identical(
+        fitInfo(fit)$testedTerm,
+        "conditionoxygen_pulse:salinity"
+    )
+    expect_identical(
+        fitInfo(fit)$effectLabel,
+        "interaction: condition x salinity"
+    )
+    expect_true(all(as.character(fit$tested_term) == "conditionoxygen_pulse:salinity"))
+
+    coefficients <- coefTable(fit)
+    expect_s4_class(coefficients, "DataFrame")
+    expect_true(all(c(
+        "gene_id",
+        "model_term",
+        "term_variable",
+        "term_variable_type",
+        "term_effect_label",
+        "estimate",
+        "std_error",
+        "p_value"
+    ) %in% names(coefficients)))
+    expect_true(any(as.character(coefficients$model_term) == "conditionoxygen_pulse:salinity"))
+
+    interaction_coefficients <- coefTable(fit, term = "condition:salinity")
+    expect_true(all(as.character(interaction_coefficients$model_term) == "conditionoxygen_pulse:salinity"))
+
+    salinity_table <- fitTable(fit, term = "salinity")
+    expect_true(all(as.character(salinity_table$tested_term) == "salinity"))
+    expect_true(any(!is.na(salinity_table$q_value)))
+})
+
 test_that("fitGeneModel fits the library-only gene model", {
     skip_if_not_installed("glmmTMB")
 

@@ -8,6 +8,8 @@
 #' @param results A `S4Vectors::DataFrame`, `data.frame`, or `NULL`.
 #' @param info A named list describing the model specification and provenance.
 #' @param models An optional named list of backend model objects.
+#' @param coefficients Optional coefficient-level table storing all fitted
+#'   fixed-effect summaries for each modeled feature.
 #'
 #' @return A valid `MTTKFit`.
 #'
@@ -26,7 +28,7 @@
 #' fitInfo(fit)$backend
 #'
 #' @export
-MTTKFit <- function(results = NULL, info = list(), models = list()) {
+MTTKFit <- function(results = NULL, info = list(), models = list(), coefficients = NULL) {
     if (is.null(results)) {
         results <- S4Vectors::DataFrame()
     } else if (is.data.frame(results) && !methods::is(results, "DataFrame")) {
@@ -51,11 +53,22 @@ MTTKFit <- function(results = NULL, info = list(), models = list()) {
         stop("'models' must be a list.", call. = FALSE)
     }
 
+    if (!is.null(coefficients)) {
+        if (is.data.frame(coefficients) && !methods::is(coefficients, "DataFrame")) {
+            coefficients <- S4Vectors::DataFrame(coefficients, check.names = FALSE)
+        }
+
+        if (!methods::is(coefficients, "DataFrame")) {
+            stop("'coefficients' must be NULL, an S4Vectors::DataFrame, or a data.frame.", call. = FALSE)
+        }
+    }
+
     out <- methods::as(results, "MTTKFit")
     metadata_list <- S4Vectors::metadata(out)
     metadata_list$mttk_fit <- list(
         info = info,
-        models = models
+        models = models,
+        coefficients = coefficients
     )
     S4Vectors::metadata(out) <- metadata_list
     methods::validObject(out)
@@ -134,6 +147,31 @@ MTTKFit <- function(results = NULL, info = list(), models = list()) {
 
     keep <- as.character(group_effects[[feature_id_column]]) %in% as.character(feature_ids)
     group_effects[keep, , drop = FALSE]
+}
+
+.subset_stored_coefficients <- function(coefficients, feature_ids, feature_id_column) {
+    if (is.null(coefficients)) {
+        return(NULL)
+    }
+
+    if (is.data.frame(coefficients) && !methods::is(coefficients, "DataFrame")) {
+        coefficients <- S4Vectors::DataFrame(coefficients, check.names = FALSE)
+    }
+
+    if (!methods::is(coefficients, "DataFrame")) {
+        return(coefficients)
+    }
+
+    if (is.null(feature_id_column) ||
+        length(feature_id_column) != 1L ||
+        is.na(feature_id_column) ||
+        feature_id_column == "" ||
+        !(feature_id_column %in% names(coefficients))) {
+        return(coefficients)
+    }
+
+    keep <- as.character(coefficients[[feature_id_column]]) %in% as.character(feature_ids)
+    coefficients[keep, , drop = FALSE]
 }
 
 .sort_fit_indices <- function(x, sortBy, decreasing) {
@@ -592,6 +630,290 @@ methods::setMethod("modelObjects", "MTTKFit", function(x) {
     fit_state$models
 })
 
+#' Extract Stored Coefficient Summaries
+#'
+#' `coefTable()` returns the stored fixed-effect coefficient summaries from an
+#' `MTTKFit`. When available, this table contains one row per
+#' feature/coefficient combination and can be filtered to a single term such as
+#' `"salinity"` or an interaction such as `"condition:salinity"`.
+#'
+#' @param x An `MTTKFit`.
+#' @param term Optional model term to keep. This is matched against the stored
+#'   coefficient names, with support for simplified interaction specifications
+#'   such as `"condition:salinity"`.
+#' @param feature Optional character vector of feature identifiers to keep.
+#' @param sortBy Optional sort key. This can be any coefficient-table column
+#'   name or the special value `"abs_estimate"`.
+#' @param decreasing Logical or `NULL`. When `NULL`, p-values sort in ascending
+#'   order and other keys sort in descending order.
+#' @param n Optional maximum number of rows to return after filtering and
+#'   sorting.
+#'
+#' @return An `S4Vectors::DataFrame`.
+#'
+#' @export
+coefTable <- function(x, term = NULL, feature = NULL, sortBy = NULL, decreasing = NULL, n = NULL) {
+    if (!methods::is(x, "MTTKFit")) {
+        stop("'x' must be an MTTKFit.", call. = FALSE)
+    }
+
+    coefficients <- .stored_coefficients(x)
+
+    if (!is.null(feature)) {
+        feature_id_column <- fitInfo(x)$featureIdColumn
+        if (is.null(feature_id_column) ||
+            length(feature_id_column) != 1L ||
+            is.na(feature_id_column) ||
+            feature_id_column == "" ||
+            !(feature_id_column %in% names(coefficients))) {
+            stop("The stored coefficient table does not declare a usable feature identifier column.", call. = FALSE)
+        }
+
+        keep <- as.character(coefficients[[feature_id_column]]) %in% as.character(feature)
+        coefficients <- coefficients[keep, , drop = FALSE]
+    }
+
+    if (!is.null(term)) {
+        if (!("model_term" %in% names(coefficients))) {
+            stop("The stored coefficient table does not contain a 'model_term' column.", call. = FALSE)
+        }
+
+        matched_term <- .resolve_requested_model_term(
+            term = term,
+            candidates = unique(as.character(coefficients$model_term)),
+            strict = TRUE,
+            term_label = "term"
+        )
+        coefficients <- coefficients[as.character(coefficients$model_term) == matched_term, , drop = FALSE]
+
+        if ("p_value" %in% names(coefficients)) {
+            p_value <- as.numeric(coefficients$p_value)
+            ok_rows <- !is.na(p_value) & is.finite(p_value)
+            coefficients$q_value <- NA_real_
+            coefficients$q_value[ok_rows] <- stats::p.adjust(p_value[ok_rows], method = "BH")
+        }
+    }
+
+    if (!is.null(n)) {
+        if (!is.numeric(n) || length(n) != 1L || is.na(n) || n < 0) {
+            stop("'n' must be NULL or a single non-negative number.", call. = FALSE)
+        }
+        n <- as.integer(n)
+    }
+
+    ord <- .sort_fit_indices(coefficients, sortBy = sortBy, decreasing = decreasing)
+    coefficients <- coefficients[ord, , drop = FALSE]
+
+    if (!is.null(n) && n < nrow(coefficients)) {
+        coefficients <- coefficients[seq_len(n), , drop = FALSE]
+    }
+
+    S4Vectors::DataFrame(coefficients, check.names = FALSE)
+}
+
+.available_coefficient_terms <- function(x) {
+    coeffs <- .stored_coefficients(x)
+    if (!("model_term" %in% names(coeffs))) {
+        stop("The stored coefficient table does not contain a 'model_term' column.", call. = FALSE)
+    }
+
+    unique(as.character(coeffs$model_term))
+}
+
+.term_metadata_from_coefficients <- function(coeffs_for_term) {
+    first_non_missing <- function(values) {
+        values <- unique(as.character(values))
+        values <- values[!is.na(values) & values != ""]
+        if (length(values) == 0L) {
+            NA_character_
+        } else {
+            values[[1L]]
+        }
+    }
+
+    list(
+        testedVariable = if ("term_variable" %in% names(coeffs_for_term)) {
+            first_non_missing(coeffs_for_term$term_variable)
+        } else {
+            NA_character_
+        },
+        variableType = if ("term_variable_type" %in% names(coeffs_for_term)) {
+            first_non_missing(coeffs_for_term$term_variable_type)
+        } else {
+            NA_character_
+        },
+        referenceLevel = if ("term_reference_level" %in% names(coeffs_for_term)) {
+            first_non_missing(coeffs_for_term$term_reference_level)
+        } else {
+            NA_character_
+        },
+        contrastLevel = if ("term_contrast_level" %in% names(coeffs_for_term)) {
+            first_non_missing(coeffs_for_term$term_contrast_level)
+        } else {
+            NA_character_
+        },
+        effectLabel = if ("term_effect_label" %in% names(coeffs_for_term)) {
+            first_non_missing(coeffs_for_term$term_effect_label)
+        } else {
+            NA_character_
+        }
+    )
+}
+
+#' Split a Multi-Term Fit Into Per-Term `MTTKFit` Objects
+#'
+#' `termFits()` materializes one canonical `MTTKFit` per fixed-effect term
+#' stored inside a multivariable fit. This allows users to fit the model once
+#' and then inspect each coefficient as its own `MTTKFit` object without
+#' refitting.
+#'
+#' By default the returned list excludes the intercept term. Request specific
+#' terms through `terms =`, using the same simplified matching supported by
+#' [coefTable()] and [fitTable()], such as `"salinity"` or
+#' `"condition:salinity"`.
+#'
+#' Backend model objects are reused across the returned fits. Stored
+#' random-slope conditional effects are retained only for the split
+#' corresponding to the original focal term of `x`, because those conditional
+#' effects are term-specific.
+#'
+#' @param x An `MTTKFit` containing stored coefficient summaries.
+#' @param terms Optional character vector of terms to materialize. When `NULL`,
+#'   all non-intercept fixed-effect terms are returned.
+#'
+#' @return A named list of `MTTKFit` objects, one per requested term.
+#'
+#' @examples
+#' fit <- MTTKFit(
+#'     results = data.frame(
+#'         ko_id = c("K1", "K2"),
+#'         tested_term = c("conditiontreated", "conditiontreated"),
+#'         estimate = c(0.3, -0.2),
+#'         row.names = c("K1", "K2")
+#'     ),
+#'     info = list(
+#'         featureIdColumn = "ko_id",
+#'         testedTerm = "conditiontreated"
+#'     ),
+#'     coefficients = data.frame(
+#'         ko_id = c("K1", "K1", "K2", "K2"),
+#'         model_term = c("conditiontreated", "salinity", "conditiontreated", "salinity"),
+#'         term_variable = c("condition", "salinity", "condition", "salinity"),
+#'         term_variable_type = c("two_level_factor", "numeric", "two_level_factor", "numeric"),
+#'         term_effect_label = c(
+#'             "condition: treated vs control",
+#'             "salinity per unit increase",
+#'             "condition: treated vs control",
+#'             "salinity per unit increase"
+#'         ),
+#'         estimate = c(0.3, 0.1, -0.2, -0.4),
+#'         std_error = c(0.1, 0.05, 0.1, 0.06),
+#'         p_value = c(0.02, 0.10, 0.05, 0.01),
+#'         row.names = c("K1::conditiontreated", "K1::salinity", "K2::conditiontreated", "K2::salinity")
+#'     )
+#' )
+#'
+#' names(termFits(fit))
+#'
+#' @export
+termFits <- function(x, terms = NULL) {
+    if (!methods::is(x, "MTTKFit")) {
+        stop("'x' must be an MTTKFit.", call. = FALSE)
+    }
+
+    available_terms <- .available_coefficient_terms(x)
+    if (is.null(terms)) {
+        terms <- setdiff(available_terms, "(Intercept)")
+        if (length(terms) == 0L) {
+            terms <- available_terms
+        }
+    } else {
+        if (!is.character(terms) || anyNA(terms) || any(terms == "")) {
+            stop("'terms' must be NULL or a character vector of non-empty term names.", call. = FALSE)
+        }
+
+        terms <- unique(vapply(
+            terms,
+            function(one_term) {
+                .resolve_requested_model_term(
+                    term = one_term,
+                    candidates = available_terms,
+                    strict = TRUE,
+                    term_label = "terms"
+                )
+            },
+            character(1)
+        ))
+    }
+
+    fit_state <- S4Vectors::metadata(x)$mttk_fit
+    original_info <- fitInfo(x)
+    original_term <- if (!is.null(original_info$testedTerm)) {
+        as.character(original_info$testedTerm)[1L]
+    } else {
+        NA_character_
+    }
+    stored_coeffs <- .stored_coefficients(x)
+    out <- vector("list", length(terms))
+    names(out) <- terms
+
+    for (i in seq_along(terms)) {
+        one_term <- terms[[i]]
+        coeffs_for_term <- coefTable(x, term = one_term)
+        one_info <- original_info
+        term_info <- .term_metadata_from_coefficients(coeffs_for_term)
+        one_info$testedTermInput <- one_term
+        one_info$testedTerm <- one_term
+        one_info$testedVariable <- term_info$testedVariable
+        one_info$variable <- term_info$testedVariable
+        one_info$variableType <- term_info$variableType
+        one_info$referenceLevel <- term_info$referenceLevel
+        one_info$contrastLevel <- term_info$contrastLevel
+        one_info$effectLabel <- term_info$effectLabel
+
+        one_fit <- MTTKFit(
+            results = fitTable(x, term = one_term),
+            info = one_info,
+            models = modelObjects(x),
+            coefficients = stored_coeffs
+        )
+
+        if (!is.null(fit_state$groupEffects) &&
+            !is.na(original_term) &&
+            identical(one_term, original_term)) {
+            metadata_list <- S4Vectors::metadata(one_fit)
+            metadata_list$mttk_fit$groupEffects <- fit_state$groupEffects
+            S4Vectors::metadata(one_fit) <- metadata_list
+            methods::validObject(one_fit)
+        }
+
+        out[[i]] <- one_fit
+    }
+
+    out
+}
+
+.stored_coefficients <- function(x) {
+    fit_state <- S4Vectors::metadata(x)$mttk_fit
+
+    if (is.null(fit_state) || is.null(fit_state$coefficients)) {
+        stop(
+            paste(
+                "This fit does not contain stored coefficient summaries.",
+                "Refit with the current version of mttk to access all fitted terms."
+            ),
+            call. = FALSE
+        )
+    }
+
+    out <- fit_state$coefficients
+    if (is.data.frame(out) && !methods::is(out, "DataFrame")) {
+        out <- S4Vectors::DataFrame(out, check.names = FALSE)
+    }
+
+    out
+}
+
 #' Extract KO-by-Genome Effects From a Random-Slope KO Fit
 #'
 #' `koGenomeEffects()` returns the KO-by-genome conditional coefficients stored
@@ -810,6 +1132,15 @@ methods::setMethod(
                     feature_ids = rownames(out)
                 )
             }
+            fit_state$coefficients <- .subset_stored_coefficients(
+                fit_state$coefficients,
+                feature_ids = rownames(out),
+                feature_id_column = if (!is.null(fit_state$info$featureIdColumn)) {
+                    as.character(fit_state$info$featureIdColumn)[1L]
+                } else {
+                    NA_character_
+                }
+            )
             fit_state$groupEffects <- .subset_group_effects(
                 fit_state$groupEffects,
                 feature_ids = rownames(out),
@@ -839,6 +1170,10 @@ methods::setMethod(
 #' @param x An `MTTKFit`.
 #' @param status Optional character vector of fit statuses to keep, such as
 #'   `"ok"` or `c("ok", "skipped")`. Use `NULL` to keep all rows.
+#' @param term Optional fitted model term to report instead of the canonical
+#'   focal term stored in the fit. This requires stored coefficient summaries
+#'   and can be useful for inspecting secondary coefficients from a multivariable
+#'   formula fit.
 #' @param sortBy Optional sort key. This can be any result column name or the
 #'   special value `"abs_estimate"`.
 #' @param decreasing Logical or `NULL`. When `NULL`, p-values and q-values sort
@@ -862,7 +1197,7 @@ methods::setMethod(
 #' fitTable(fit, sortBy = "q_value")
 #'
 #' @export
-fitTable <- function(x, status = NULL, sortBy = NULL, decreasing = NULL, n = NULL) {
+fitTable <- function(x, status = NULL, term = NULL, sortBy = NULL, decreasing = NULL, n = NULL) {
     if (!methods::is(x, "MTTKFit")) {
         stop("'x' must be an MTTKFit.", call. = FALSE)
     }
@@ -876,6 +1211,55 @@ fitTable <- function(x, status = NULL, sortBy = NULL, decreasing = NULL, n = NUL
 
         keep <- as.character(out$status) %in% as.character(status)
         out <- out[keep, , drop = FALSE]
+    }
+
+    if (!is.null(term)) {
+        out <- S4Vectors::DataFrame(out, check.names = FALSE)
+        coeffs <- coefTable(x, term = term)
+        feature_id_column <- fitInfo(x)$featureIdColumn
+
+        if (is.null(feature_id_column) ||
+            length(feature_id_column) != 1L ||
+            is.na(feature_id_column) ||
+            feature_id_column == "" ||
+            !(feature_id_column %in% names(coeffs))) {
+            stop("Stored coefficient summaries do not contain a usable feature identifier column.", call. = FALSE)
+        }
+
+        coeffs <- coeffs[!duplicated(as.character(coeffs[[feature_id_column]])), , drop = FALSE]
+        coeff_map <- stats::setNames(seq_len(nrow(coeffs)), as.character(coeffs[[feature_id_column]]))
+        idx <- unname(coeff_map[rownames(out)])
+
+        coefficient_column_map <- c(
+            tested_term = "model_term",
+            variable_type = "term_variable_type",
+            reference_level = "term_reference_level",
+            contrast_level = "term_contrast_level",
+            effect_label = "term_effect_label",
+            estimate = "estimate",
+            std_error = "std_error",
+            statistic = "statistic",
+            p_value = "p_value"
+        )
+        columns_to_override <- names(coefficient_column_map)[
+            unname(coefficient_column_map) %in% names(coeffs)
+        ]
+
+        for (col_name in columns_to_override) {
+            source_col <- coefficient_column_map[[col_name]]
+            source_values <- S4Vectors::decode(coeffs[[source_col]])
+            values <- source_values[rep(NA_integer_, nrow(out))]
+            matched <- !is.na(idx)
+            values[matched] <- source_values[idx[matched]]
+            out[[col_name]] <- values
+        }
+
+        if ("p_value" %in% names(out)) {
+            p_value <- as.numeric(out$p_value)
+            ok_rows <- !is.na(p_value) & is.finite(p_value)
+            out$q_value <- NA_real_
+            out$q_value[ok_rows] <- stats::p.adjust(p_value[ok_rows], method = "BH")
+        }
     }
 
     if (!is.null(n)) {
@@ -1102,11 +1486,22 @@ annotateKOFit <- function(
         annotations[rownames(x), , drop = FALSE]
     )
 
-    MTTKFit(
+    out <- MTTKFit(
         results = results,
         info = fitInfo(x),
-        models = modelObjects(x)
+        models = modelObjects(x),
+        coefficients = tryCatch(.stored_coefficients(x), error = function(e) NULL)
     )
+
+    fit_state <- S4Vectors::metadata(x)$mttk_fit
+    if (!is.null(fit_state$groupEffects)) {
+        metadata_list <- S4Vectors::metadata(out)
+        metadata_list$mttk_fit$groupEffects <- fit_state$groupEffects
+        S4Vectors::metadata(out) <- metadata_list
+        methods::validObject(out)
+    }
+
+    out
 }
 
 #' Fetch KEGG Module Annotations with KEGGREST
