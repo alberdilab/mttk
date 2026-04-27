@@ -186,7 +186,7 @@ Rather than re-aggregating counts, the meta-analysis layer summarises the
 already-fitted KO effect estimates. No new model is fitted.
 
 ```{r module-meta}
-module_fit <- fitModuleMetaAnalysis(x, object = ko_fit)
+module_fit <- fitModuleMetaAnalysis(ko_fit, object = x)
 fitTable(module_fit)
 ```
 
