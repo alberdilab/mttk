@@ -1,6 +1,6 @@
 Package: mttk
 Title: Metatranscriptomics toolkit for nested gene, genome, and community analysis
-Version: 0.2.5
+Version: 0.2.6
 Authors@R:
     person(
         given = "Antton",
@@ -35,6 +35,7 @@ Suggests:
     BiocStyle,
     KEGGREST,
     knitr,
+    phyloseq,
     rmarkdown,
     testthat (>= 3.0.0)
 VignetteBuilder: knitr
@@ -63,6 +64,7 @@ Collate:
     'MTTKExperiment-modeling-gene.R'
     'MTTKExperiment-modeling-dispersion.R'
     'MTTKFit-variance.R'
+    'MTTKExperiment-import.R'
     'MTTKExample.R'
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3

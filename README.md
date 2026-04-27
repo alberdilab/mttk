@@ -305,6 +305,8 @@ So the current position of mttk is:
 The current version already supports:
 
 - `MTTKExperiment` for explicit gene/genome data storage,
+- import from TSV/CSV files (`readMTTKExperiment()`) and from `phyloseq`
+  objects (`fromPhyloseq()`),
 - aggregation to genomes and annotation-linked groups,
 - KO-level mixed models with `glmmTMB`,
 - KO-level dispersion models testing whether expression variability differs

@@ -1,3 +1,23 @@
+# mttk 0.2.6
+
+## New features
+
+- `readMTTKExperiment()`: construct an `MTTKExperiment` directly from
+  delimited files (TSV/CSV). Accepts a gene count matrix, gene annotations,
+  sample metadata, genome counts, genome metadata, a Newick tree, and
+  optional KO-to-module/pathway link tables. Separator is auto-detected from
+  file extension. Link tables (`gene_to_genome`, `gene_to_ko`) are built
+  automatically from the annotation file when `genome_id` and `ko_id` columns
+  are present.
+- `fromPhyloseq()`: convert one or two `phyloseq` objects into an
+  `MTTKExperiment`. The primary object supplies gene-level RNA counts,
+  sample metadata, and gene annotations (via `tax_table`). An optional
+  `genomePhyloseq` argument provides genome-level DNA counts, genome
+  metadata, and a genome phylogeny. Requires the `phyloseq` package
+  (Bioconductor).
+
+---
+
 # mttk 0.2.5
 
 ## New features
