@@ -1,0 +1,258 @@
+---
+title: "mttk interactive walkthrough"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse  = TRUE,
+  comment   = "#>",
+  message   = FALSE,
+  warning   = FALSE
+)
+```
+
+# Welcome
+
+This document is a self-contained, chunk-by-chunk walkthrough of the main
+**mttk** workflows. You are running it inside a Binder session with mttk and
+all its dependencies already installed.
+
+**How to use this document:**
+
+- Run each chunk in order by clicking the green **Run** button (▶) at the top
+  right of the chunk, or press **Ctrl + Shift + Enter** (Windows / Linux) or
+  **Cmd + Shift + Enter** (Mac).
+- Read the text between chunks — it explains what the code does and how to
+  interpret the results.
+- Modify the code and re-run to experiment.
+
+---
+
+# 1  Load the package
+
+```{r load}
+library(mttk)
+```
+
+---
+
+# 2  The dataset
+
+mttk ships a synthetic showcase dataset that mimics a genome-resolved
+metatranscriptomics experiment. It contains:
+
+- **16 genes** from **4 genomes** measured across **6 samples**
+- **3 control** and **3 oxygen-pulse** incubations, each replicated at 3
+  stations
+- RNA gene counts, genome-level DNA counts, a genome phylogeny, and
+  KO / module / pathway link tables
+
+```{r load-data}
+x <- makeShowcaseMTTKExperiment()
+x
+```
+
+### Sample metadata
+
+```{r sample-meta}
+as.data.frame(SummarizedExperiment::colData(x))
+```
+
+### Genome metadata
+
+```{r genome-meta}
+as.data.frame(genomeData(x))
+```
+
+### Phylogenetic tree
+
+```{r tree}
+genomeTree(x)
+```
+
+Two bacterial and two archaeal genomes form two clades.
+
+### What is stored in the object
+
+```{r structure}
+names(geneAssays(x))    # gene-level assays
+names(genomeAssays(x))  # genome-level assays
+names(links(x))         # hierarchical link tables
+```
+
+---
+
+# 3  Gene-level analysis
+
+**Question:** Which individual genes change between the control and oxygen-pulse
+treatments?
+
+```{r gene-model}
+gene_fit <- fitGeneModel(x, variable = "condition")
+```
+
+```{r gene-results}
+fitTable(gene_fit)
+```
+
+```{r gene-plot, fig.width = 6, fig.height = 4}
+plotEffects(gene_fit, alpha = 0.05)
+```
+
+Each point is one gene. The x-axis shows the log-scale effect of the
+oxygen-pulse treatment. Significant genes (q ≤ 0.05) are highlighted in red
+(up) or blue (down).
+
+---
+
+# 4  Genome-level analysis
+
+**Question:** Which genomes shift their overall transcriptional activity in
+the oxygen-pulse condition?
+
+```{r genome-model}
+genome_fit <- fitGenomeModel(x, variable = "condition")
+```
+
+```{r genome-results}
+fitTable(genome_fit)
+```
+
+```{r genome-volcano, fig.width = 5, fig.height = 4}
+plotVolcano(genome_fit)
+```
+
+```{r genome-tree, fig.width = 6, fig.height = 4}
+plotGenomeEffects(genome_fit, tree = genomeTree(x))
+```
+
+Tip colour and size reflect the direction and magnitude of the genome
+response. The two bacterial genomes (genome_1 and genome_2) branch together
+on the left; the two archaeal genomes (genome_3 and genome_4) on the right.
+
+---
+
+# 5  KO-level analysis
+
+**Question:** Which KEGG Orthologs show a shared response across all genomes?
+
+This workflow fits one negative-binomial mixed model per KO. The genome random
+intercept accounts for the fact that genes from the same genome share a common
+baseline.
+
+```{r ko-model}
+ko_fit <- fitKOMixedModel(x, variable = "condition")
+```
+
+```{r ko-results}
+fitTable(ko_fit)
+```
+
+```{r ko-volcano, fig.width = 5, fig.height = 4}
+plotVolcano(ko_fit)
+```
+
+```{r ko-effects, fig.width = 5, fig.height = 4}
+plotEffects(ko_fit)
+```
+
+### Significant KOs only
+
+```{r ko-sig}
+significantResults(ko_fit)
+```
+
+### Per-KO coefficient table
+
+`coefTable()` gives the full coefficient summary including standard errors:
+
+```{r ko-coef}
+coefTable(ko_fit)
+```
+
+---
+
+# 6  Module-level meta-analysis
+
+**Question:** Do the KOs assigned to each module show a coherent direction of
+response?
+
+Rather than re-aggregating counts, the meta-analysis layer summarises the
+already-fitted KO effect estimates. No new model is fitted.
+
+```{r module-meta}
+module_fit <- fitModuleMetaAnalysis(x, object = ko_fit)
+fitTable(module_fit)
+```
+
+```{r module-plot, fig.width = 5, fig.height = 3}
+plotEffects(module_fit, n = NULL)
+```
+
+---
+
+# 7  Genome-domain comparison
+
+**Question:** Does the KO response differ between Bacteria and Archaea?
+
+`fitKOGroupInteractionModel()` adds a genome-group × condition interaction to
+the model so that KO responses can be compared directly between the two
+domains.
+
+```{r group-model}
+group_fit <- fitKOGroupInteractionModel(
+    x,
+    variable = "condition",
+    group    = "domain"
+)
+fitTable(group_fit)
+```
+
+---
+
+# 8  Clade scan
+
+**Question:** Is there a subtree of related genomes with a distinctly shifted
+genome response?
+
+`scanGenomeClades()` tests each internal clade in the phylogeny for a shifted
+mean relative to the rest of the tree using a permutation test.
+
+```{r clade-scan}
+clade_fit <- scanGenomeClades(genome_fit, x, nPerm = 199)
+fitTable(clade_fit)
+```
+
+```{r clade-plot, fig.width = 6, fig.height = 4}
+plotCladeScan(clade_fit, tree = genomeTree(x))
+```
+
+---
+
+# 9  What next?
+
+### Interactive workflow finder
+
+Run this in the R console to get a guided recommendation for your own
+biological question:
+
+```{r workflow, eval = FALSE}
+findWorkflow()
+```
+
+### Adapting the examples to your own data
+
+Replace `x <- makeShowcaseMTTKExperiment()` with your own `MTTKExperiment`
+and swap `variable = "condition"` for the column name in `colData(x)` that
+holds your treatment variable.
+
+### Further reading
+
+- Full vignette: `vignette("MTTKExperiment-overview", package = "mttk")`
+- Function reference: `help(package = "mttk")`
+- Source and issue tracker: <https://github.com/alberdilab/mttk>

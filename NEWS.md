@@ -1,3 +1,15 @@
+# mttk 0.2.2
+
+## Documentation
+
+- Added `mttk_walkthrough.Rmd`: a self-contained, chunk-by-chunk interactive
+  tutorial covering gene-, genome-, KO-, module-, and clade-level workflows on
+  the built-in showcase dataset. Designed to be opened directly in the Binder
+  RStudio session.
+- Updated README to direct Binder users to `mttk_walkthrough.Rmd`.
+
+---
+
 # mttk 0.2.1
 
 ## Documentation

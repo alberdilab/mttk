@@ -9,6 +9,10 @@ Metatranscriptomics toolkit for nested gene, genome, and community analysis.
 Click the Binder badge above to launch a free, browser-based RStudio session
 with mttk and all its dependencies pre-installed. No local R setup is needed.
 
+Once RStudio opens, find **`mttk_walkthrough.Rmd`** in the Files panel
+(bottom-right), open it, and run the chunks in order to explore the main
+workflows on a built-in example dataset.
+
 > **Note:** The first launch can take 5–10 minutes while Binder builds the
 > environment. This is a one-time cost caused by the Bioconductor dependencies
 > (`TreeSummarizedExperiment`, `S4Vectors`, etc.), which are large and must be
