@@ -1,6 +1,10 @@
 # mttk
 
 [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/alberdilab/mttk/main?urlpath=rstudio)
+[![Release](https://img.shields.io/github/v/release/alberdilab/mttk?label=release)](https://github.com/alberdilab/mttk/releases)
+[![License: Artistic-2.0](https://img.shields.io/badge/license-Artistic--2.0-blue)](https://opensource.org/licenses/Artistic-2.0)
+[![R ≥ 4.3](https://img.shields.io/badge/R-%E2%89%A5%204.3-276DC2?logo=r&logoColor=white)](https://www.r-project.org)
+[![lifecycle: experimental](https://img.shields.io/badge/lifecycle-experimental-orange)](https://lifecycle.r-lib.org/articles/stages.html)
 
 Metatranscriptomics toolkit for nested gene, genome, and community analysis.
 
