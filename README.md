@@ -1,5 +1,7 @@
 # mttk
 
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/alberdilab/mttk/main?urlpath=rstudio)
+
 Metatranscriptomics toolkit for nested gene, genome, and community analysis.
 
 ## What mttk is for
