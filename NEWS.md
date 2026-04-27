@@ -1,3 +1,22 @@
+# mttk 0.2.5
+
+## New features
+
+- `fitKODispersion()`: fits a KO-level negative-binomial mixed model with a
+  variable dispersion term (`dispformula = ~ variable`), testing whether
+  expression variability (overdispersion) differs across conditions or along a
+  continuous gradient. A positive estimate means higher phi (more
+  Poisson-like, less variable) in the contrast group; a negative estimate means
+  more overdispersed expression.
+- `varianceDecomposition()`: extracts per-feature variance components from
+  stored backend model objects in an `MTTKFit` (requires `keepFits = TRUE`).
+  Returns genome random-effect variance, optional sample-block variance, the
+  NB2 dispersion parameter phi, an approximated latent residual variance
+  (`log(1 + 1/phi)`), total variance, and genome/block intraclass correlation
+  coefficients (ICC) on the log link scale.
+
+---
+
 # mttk 0.2.4
 
 ## Bug fixes

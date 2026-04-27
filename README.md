@@ -123,6 +123,9 @@ most relevant mttk function.
 
 3. If the unit is a KO:
 - Shared KO response across genomes: `fitKOMixedModel()`.
+- KO expression variability differs across conditions: `fitKODispersion()`.
+- How much variance is genome-driven vs residual: `fitKOMixedModel()` with
+  `keepFits = TRUE`, then `varianceDecomposition()`.
 - KO response differs among genomes: `fitKORandomSlopeModel()`.
 - Direct KO contrast between two genome groups: `fitKOGroupInteractionModel()`.
 - Coherence of KO responses within a genome group:
@@ -304,6 +307,10 @@ The current version already supports:
 - `MTTKExperiment` for explicit gene/genome data storage,
 - aggregation to genomes and annotation-linked groups,
 - KO-level mixed models with `glmmTMB`,
+- KO-level dispersion models testing whether expression variability differs
+  across conditions (`fitKODispersion()`),
+- per-feature variance decomposition into genome, block, and residual
+  components with ICC on the log scale (`varianceDecomposition()`),
 - KO-level random-slope mixed models with KO-by-genome effect extraction,
 - module- and pathway-level KO meta-analysis built on KO effect sizes,
 - module- and pathway-level mixed models for total functional activity,
