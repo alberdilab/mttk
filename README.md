@@ -13,12 +13,6 @@ Once RStudio opens, find **`mttk_walkthrough.Rmd`** in the Files panel
 (bottom-right), open it, and run the chunks in order to explore the main
 workflows on a built-in example dataset.
 
-> **Note:** The first launch can take 5–10 minutes while Binder builds the
-> environment. This is a one-time cost caused by the Bioconductor dependencies
-> (`TreeSummarizedExperiment`, `S4Vectors`, etc.), which are large and must be
-> compiled from source. Once built, the image is cached and subsequent launches
-> are fast.
-
 ## What mttk is for
 
 mttk is designed for genome-resolved metatranscriptomics, where the data are

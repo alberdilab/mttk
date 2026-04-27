@@ -1,3 +1,16 @@
+# mttk 0.2.3
+
+## Bug fixes
+
+- Fixed Binder environment: `binder/install.R` now installs mttk from the
+  locally cloned repository files (`remotes::install_local()`) instead of
+  re-downloading from GitHub, so `library(mttk)` works correctly in the
+  Binder session.
+- Removed redundant build-time warning from README (the Binder image is
+  cached per repository and shared across all users).
+
+---
+
 # mttk 0.2.2
 
 ## Documentation

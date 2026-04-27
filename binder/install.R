@@ -20,4 +20,4 @@ install.packages(c(
   "remotes"
 ), repos = "https://cloud.r-project.org")
 
-remotes::install_github("alberdilab/mttk", upgrade = "never")
+remotes::install_local(".", dependencies = FALSE, upgrade = "never")
