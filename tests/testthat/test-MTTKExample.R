@@ -54,12 +54,11 @@ test_that("the packaged showcase object is available and reproducible", {
     )
     expect_identical(
         names(genomeAssays(MTTKShowcase, withDimnames = FALSE)),
-        c("rna_genome_counts", "dna_genome_counts")
+        "dna_genome_counts"
     )
     expect_identical(rownames(genomeData(MTTKShowcase)), c("genome_1", "genome_2", "genome_3", "genome_4"))
     expect_s3_class(genomeTree(MTTKShowcase), "phylo")
     expect_identical(sort(genomeTree(MTTKShowcase)$tip.label), c("genome_1", "genome_2", "genome_3", "genome_4"))
-    expect_identical(dim(rnaGenomeCounts(MTTKShowcase)), c(4L, 6L))
     expect_identical(dim(dnaGenomeCounts(MTTKShowcase)), c(4L, 6L))
     expect_true("station_id" %in% names(SummarizedExperiment::colData(MTTKShowcase)))
     domain_table <- table(as.character(genomeData(MTTKShowcase)$domain))

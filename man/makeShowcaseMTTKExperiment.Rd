@@ -18,7 +18,7 @@ compact but more realistic object.
 The returned object contains:
 \itemize{
 \item sixteen genes measured across six samples,
-\item both \code{rna_gene_counts} and genome-level \code{rna_genome_counts},
+\item a gene-level \code{rna_gene_counts} assay,
 \item a genome-level \code{dna_genome_counts} assay stored in \code{genomeExperiment(x)},
 \item a rooted genome phylogeny stored in \code{genomeTree(x)},
 \item four genomes spanning two domains,

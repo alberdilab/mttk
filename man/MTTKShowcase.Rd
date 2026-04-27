@@ -18,11 +18,11 @@ MTTKShowcase
 walkthroughs of the main mttk workflows.
 }
 \details{
-The object contains one gene-level assay (\code{rna_gene_counts}), two
-genome-level assays (\code{rna_genome_counts} and \code{dna_genome_counts}), a rooted
-genome phylogeny, sixteen genes, six samples, four genomes, and a small set
-of overlapping functional mappings chosen to support KO-, module-,
-pathway-, genome-, and group-comparison examples.
+The object contains one gene-level assay (\code{rna_gene_counts}), one
+genome-level assay (\code{dna_genome_counts}), a rooted genome phylogeny,
+sixteen genes, six samples, four genomes, and a small set of overlapping
+functional mappings chosen to support KO-, module-, pathway-, genome-, and
+group-comparison examples.
 }
 \examples{
 data("MTTKShowcase")

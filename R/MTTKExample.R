@@ -358,13 +358,6 @@ makeExampleMTTKExperiment <- function() {
         )
     )
 
-    rna_genome_counts <- base::rowsum(
-        rna_gene_counts,
-        group = as.character(row_data$genome_id),
-        reorder = FALSE
-    )
-    rownames(rna_genome_counts) <- genome_ids
-
     list(
         assays = list(
             rna_gene_counts = rna_gene_counts
@@ -372,7 +365,6 @@ makeExampleMTTKExperiment <- function() {
         rowData = row_data,
         colData = col_data,
         genomeAssays = list(
-            rna_genome_counts = rna_genome_counts,
             dna_genome_counts = dna_genome_counts
         ),
         genomeData = genome_data,
@@ -414,7 +406,7 @@ makeExampleMTTKExperiment <- function() {
 #' The returned object contains:
 #'
 #' - sixteen genes measured across six samples,
-#' - both `rna_gene_counts` and genome-level `rna_genome_counts`,
+#' - a gene-level `rna_gene_counts` assay,
 #' - a genome-level `dna_genome_counts` assay stored in `genomeExperiment(x)`,
 #' - a rooted genome phylogeny stored in `genomeTree(x)`,
 #' - four genomes spanning two domains,
@@ -439,11 +431,11 @@ makeShowcaseMTTKExperiment <- function() {
 #' `MTTKShowcase` is a packaged `MTTKExperiment` intended for vignette-style
 #' walkthroughs of the main mttk workflows.
 #'
-#' The object contains one gene-level assay (`rna_gene_counts`), two
-#' genome-level assays (`rna_genome_counts` and `dna_genome_counts`), a rooted
-#' genome phylogeny, sixteen genes, six samples, four genomes, and a small set
-#' of overlapping functional mappings chosen to support KO-, module-,
-#' pathway-, genome-, and group-comparison examples.
+#' The object contains one gene-level assay (`rna_gene_counts`), one
+#' genome-level assay (`dna_genome_counts`), a rooted genome phylogeny, sixteen
+#' genes, six samples, four genomes, and a small set of overlapping functional
+#' mappings chosen to support KO-, module-, pathway-, genome-, and
+#' group-comparison examples.
 #'
 #' @docType data
 #' @format An `MTTKExperiment` object with 16 rows and 6 columns.
