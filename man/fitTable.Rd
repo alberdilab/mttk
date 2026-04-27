@@ -8,6 +8,9 @@ fitTable(
   x,
   status = NULL,
   term = NULL,
+  view = c("standard", "minimal", "full"),
+  columns = NULL,
+  exclude = NULL,
   sortBy = NULL,
   decreasing = NULL,
   n = NULL
@@ -23,6 +26,15 @@ fitTable(
 focal term stored in the fit. This requires stored coefficient summaries
 and can be useful for inspecting secondary coefficients from a multivariable
 formula fit.}
+
+\item{view}{One of \code{"standard"} (default), \code{"minimal"}, or \code{"full"}.
+Controls which columns are returned when \code{columns} is \code{NULL}. See Details.}
+
+\item{columns}{Optional character vector of column names to return. When
+supplied this takes precedence over \code{view}.}
+
+\item{exclude}{Optional character vector of column names to remove from the
+result after \code{view} or \code{columns} has been applied.}
 
 \item{sortBy}{Optional sort key. This can be any result column name or the
 special value \code{"abs_estimate"}.}
@@ -42,6 +54,20 @@ An \code{S4Vectors::DataFrame}.
 result table, optionally filtered to a subset of fit statuses and sorted by
 p-values, q-values, effect size, or another result column.
 }
+\details{
+The \code{view} argument controls how many columns are returned by default:
+\itemize{
+\item \code{"standard"} (the default) returns the feature identifier, effect label,
+estimate, standard error, p-value, q-value, and status.
+\item \code{"minimal"} returns only the feature identifier, estimate, q-value, and
+status.
+\item \code{"full"} returns every column stored in the fit.
+}
+
+Use \code{columns} to request an exact named set of columns, overriding \code{view}.
+Use \code{exclude} to drop one or more columns from the result regardless of the
+active \code{view}.
+}
 \examples{
 fit <- MTTKFit(
     results = data.frame(
@@ -54,5 +80,7 @@ fit <- MTTKFit(
 )
 
 fitTable(fit, sortBy = "q_value")
+fitTable(fit, view = "minimal")
+fitTable(fit, view = "full")
 
 }

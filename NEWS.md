@@ -1,3 +1,20 @@
+# mttk 0.2.4
+
+## Bug fixes
+
+- Fixed `library(mttk)` failing in Binder: `binder/install.R` now resolves the
+  repo path via the `REPO_DIR` environment variable set by repo2docker, so
+  `remotes::install_local()` finds the package regardless of working directory.
+- Fixed plot functions (`plotVolcano`, `plotEffects`, `plotEffectHeatmap`,
+  `plotGenomeEffects`, `plotCladeScan`) not being found after `library(mttk)`:
+  the five exports were missing from `NAMESPACE` because `devtools::document()`
+  had not been run after `R/MTTKPlot-fit.R` was added.
+- Added `view`, `columns`, and `exclude` arguments to `fitTable()` for concise
+  result tables; default `view = "standard"` returns feature ID, effect label,
+  estimate, std error, p-value, q-value, and status only.
+
+---
+
 # mttk 0.2.3
 
 ## Bug fixes

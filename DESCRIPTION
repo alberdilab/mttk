@@ -1,6 +1,6 @@
 Package: mttk
 Title: Metatranscriptomics toolkit for nested gene, genome, and community analysis
-Version: 0.2.3
+Version: 0.2.4
 Authors@R:
     person(
         given = "Antton",

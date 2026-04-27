@@ -177,7 +177,7 @@ test_that("coefTable and fitTable(term=) use stored coefficient summaries", {
     expect_identical(as.character(coefficients$model_term), c("salinity", "salinity"))
     expect_true("q_value" %in% names(coefficients))
 
-    salinity_table <- fitTable(fit, term = "salinity", sortBy = "p_value")
+    salinity_table <- fitTable(fit, term = "salinity", sortBy = "p_value", view = "full")
     expect_identical(rownames(salinity_table), c("K02111", "K03043"))
     expect_true(all(as.character(salinity_table$tested_term) == "salinity"))
     expect_equal(as.numeric(salinity_table$estimate), c(-0.4, 0.1))

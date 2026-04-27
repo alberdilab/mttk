@@ -1160,12 +1160,51 @@ methods::setMethod(
     }
 )
 
+.select_fit_columns <- function(out, view, columns, exclude, feature_id_col) {
+    if (!is.null(columns)) {
+        keep <- intersect(columns, names(out))
+        out <- out[, keep, drop = FALSE]
+    } else {
+        view <- match.arg(view, c("standard", "minimal", "full"))
+        if (view == "standard") {
+            priority <- c(feature_id_col, "effect_label", "estimate", "std_error", "p_value", "q_value", "status")
+            keep <- intersect(priority, names(out))
+            out <- out[, keep, drop = FALSE]
+        } else if (view == "minimal") {
+            priority <- c(feature_id_col, "estimate", "q_value", "status")
+            keep <- intersect(priority, names(out))
+            out <- out[, keep, drop = FALSE]
+        }
+    }
+
+    if (!is.null(exclude)) {
+        drop <- intersect(exclude, names(out))
+        if (length(drop) > 0L) {
+            out <- out[, setdiff(names(out), drop), drop = FALSE]
+        }
+    }
+
+    out
+}
+
 #' Extract a Sorted Fit Result Table
 #'
 #' `fitTable()` returns an ordered `S4Vectors::DataFrame` view of an
 #' `MTTKFit`. This is useful when the fit should be inspected as a regular
 #' result table, optionally filtered to a subset of fit statuses and sorted by
 #' p-values, q-values, effect size, or another result column.
+#'
+#' The `view` argument controls how many columns are returned by default:
+#'
+#' - `"standard"` (the default) returns the feature identifier, effect label,
+#'   estimate, standard error, p-value, q-value, and status.
+#' - `"minimal"` returns only the feature identifier, estimate, q-value, and
+#'   status.
+#' - `"full"` returns every column stored in the fit.
+#'
+#' Use `columns` to request an exact named set of columns, overriding `view`.
+#' Use `exclude` to drop one or more columns from the result regardless of the
+#' active `view`.
 #'
 #' @param x An `MTTKFit`.
 #' @param status Optional character vector of fit statuses to keep, such as
@@ -1174,6 +1213,12 @@ methods::setMethod(
 #'   focal term stored in the fit. This requires stored coefficient summaries
 #'   and can be useful for inspecting secondary coefficients from a multivariable
 #'   formula fit.
+#' @param view One of `"standard"` (default), `"minimal"`, or `"full"`.
+#'   Controls which columns are returned when `columns` is `NULL`. See Details.
+#' @param columns Optional character vector of column names to return. When
+#'   supplied this takes precedence over `view`.
+#' @param exclude Optional character vector of column names to remove from the
+#'   result after `view` or `columns` has been applied.
 #' @param sortBy Optional sort key. This can be any result column name or the
 #'   special value `"abs_estimate"`.
 #' @param decreasing Logical or `NULL`. When `NULL`, p-values and q-values sort
@@ -1195,12 +1240,18 @@ methods::setMethod(
 #' )
 #'
 #' fitTable(fit, sortBy = "q_value")
+#' fitTable(fit, view = "minimal")
+#' fitTable(fit, view = "full")
 #'
 #' @export
-fitTable <- function(x, status = NULL, term = NULL, sortBy = NULL, decreasing = NULL, n = NULL) {
+fitTable <- function(x, status = NULL, term = NULL,
+                     view = c("standard", "minimal", "full"),
+                     columns = NULL, exclude = NULL,
+                     sortBy = NULL, decreasing = NULL, n = NULL) {
     if (!methods::is(x, "MTTKFit")) {
         stop("'x' must be an MTTKFit.", call. = FALSE)
     }
+    view <- match.arg(view)
 
     out <- x
 
@@ -1275,6 +1326,14 @@ fitTable <- function(x, status = NULL, term = NULL, sortBy = NULL, decreasing = 
     if (!is.null(n) && n < nrow(out)) {
         out <- out[seq_len(n), , drop = FALSE]
     }
+
+    feature_id_col <- fitInfo(x)$featureIdColumn
+    if (is.null(feature_id_col) || is.na(feature_id_col) || feature_id_col == "") {
+        feature_id_col <- character(0L)
+    }
+
+    out <- .select_fit_columns(out, view = view, columns = columns,
+                               exclude = exclude, feature_id_col = feature_id_col)
 
     S4Vectors::DataFrame(out, check.names = FALSE)
 }

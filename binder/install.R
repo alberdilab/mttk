@@ -20,4 +20,5 @@ install.packages(c(
   "remotes"
 ), repos = "https://cloud.r-project.org")
 
-remotes::install_local(".", dependencies = FALSE, upgrade = "never")
+repo_dir <- Sys.getenv("REPO_DIR", unset = ".")
+remotes::install_local(repo_dir, dependencies = FALSE, upgrade = "never")
