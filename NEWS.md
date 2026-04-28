@@ -1,3 +1,26 @@
+# mttk 0.2.7
+
+## New features
+
+- Flexible KO column detection in `readMTTKExperiment()` and `fromPhyloseq()`:
+  the `koIdCol` argument now accepts any column name and falls back to a
+  case-insensitive search over 13 common name variants (`ko`, `kegg`,
+  `kegg_id`, `kegg_ko`, `ko_ids`, etc.). If no column is found by name, every
+  character column is scanned for values matching the `K[0-9]{5}` pattern; the
+  first column where ≥ 50 % of values match is selected automatically. KO
+  values that do not match the pattern are silently dropped with a warning.
+- `buildKEGGLinks(ko_ids, sleep = 0.3)`: new exported helper that queries the
+  KEGG REST API (via `KEGGREST`) in batches of 10 identifiers and returns a
+  `SimpleList` of three `DataFrame` objects — `ko_to_module`,
+  `ko_to_pathway` (reference pathways only, `map` prefix), and
+  `module_to_pathway`.
+- `fetchKEGGLinks = FALSE` argument added to `readMTTKExperiment()` and
+  `fromPhyloseq()`: set to `TRUE` to call `buildKEGGLinks()` automatically
+  after the object is constructed, replacing the previous `koToModule`,
+  `koToPathway`, and `moduleToPathway` file arguments that have been removed.
+
+---
+
 # mttk 0.2.6
 
 ## New features
